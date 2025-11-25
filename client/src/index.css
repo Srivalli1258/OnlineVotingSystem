@@ -1,0 +1,389 @@
+:root{
+  --bg: #fafafa;
+  --card: #ffffff;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-600: #1e40af;
+  --danger: #dc2626;
+  --radius: 10px;
+  --max-width: 920px;
+  --gap: 16px;
+  --shadow: 0 6px 18px rgba(16,24,40,0.08);
+  --mono: 'Courier New', monospace;
+  font-size: 16px;
+}
+
+* { box-sizing: border-box; }
+html,body,#root { height: 100%; }
+body{
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  background: linear-gradient(180deg, #f7f9fc 0%, var(--bg) 100%);
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.45;
+}
+
+/* Page layout */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.container {
+  width: 100%;
+  max-width: var(--max-width);
+  margin: 28px auto;
+  padding: 20px;
+}
+
+/* Top nav */
+nav.app-nav {
+  width: 100%;
+  background: white;
+  border-bottom: 1px solid #e6e9ef;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.02);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+nav.app-nav .nav-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.brand {
+  display:flex;
+  align-items:center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--accent-600);
+}
+.brand .logo {
+  height: 34px;
+  width: 34px;
+  border-radius: 8px;
+  background: linear-gradient(135deg,var(--accent), #60a5fa);
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  color: white;
+  font-weight:700;
+}
+
+/* Nav links */
+.nav-links { display:flex; gap: 12px; align-items:center; }
+.nav-links a {
+  text-decoration:none;
+  color: #111827;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.nav-links a:hover {
+  background: #f3f4f6;
+}
+
+/* Card / forms */
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+/* Two-column responsive content */
+.grid {
+  display:grid;
+  gap: var(--gap);
+}
+.grid.cols-2 {
+  grid-template-columns: 1fr 420px;
+}
+@media (max-width: 880px) {
+  .grid.cols-2 { grid-template-columns: 1fr; }
+}
+
+/* Form styles */
+form .form-row {
+  margin-bottom: 12px;
+}
+label.form-label {
+  display:block;
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+input[type="text"], input[type="password"], input[type="email"], select, textarea {
+  width:100%;
+  padding: 10px 12px;
+  border-radius:8px;
+  border: 1px solid #e6e9ef;
+  background: #fff;
+  font-size: 0.95rem;
+  transition: border-color .15s, box-shadow .15s;
+  outline: none;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px rgba(37,99,235,0.08);
+}
+
+/* Buttons */
+.btn {
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding: 10px 14px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn.secondary {
+  background: #f3f4f6;
+  color: #111827;
+  border: 1px solid #e6e9ef;
+}
+.btn.danger {
+  background: var(--danger);
+}
+
+/* Small helpers */
+.h1 { font-size: 1.6rem; margin: 0 0 12px 0; }
+.h2 { font-size: 1.2rem; margin: 0 0 10px 0; color: #111827; }
+.note { font-size: 0.92rem; color: var(--muted); }
+
+/* Listing */
+.list a {
+  display:block;
+  padding: 12px;
+  border-radius: 8px;
+  text-decoration:none;
+  color: #111827;
+  border: 1px solid transparent;
+}
+.list a:hover { background: #f8fafc; border-color: #e6eefc; }
+
+/* VoteCard */
+.vote-card {
+  padding: 12px;
+  border-radius: 8px;
+  background: linear-gradient(180deg,#fff,#fbfdff);
+  border: 1px solid #eef2ff;
+}
+.vote-card ul { list-style: none; padding: 0; margin: 0; }
+.vote-card li { padding: 8px 6px; display:flex; align-items:center; gap:8px; border-bottom: 1px dashed #f1f5f9; }
+.vote-card li:last-child { border-bottom: none; }
+.vote-card input[type="radio"] { width: 18px; height: 18px; }
+
+/* Message */
+.message {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #fff7ed;
+  border: 1px solid #ffedd5;
+  color: #92400e;
+}
+
+/* Footer */
+.footer {
+  margin-top: auto;
+  color: var(--muted);
+  padding: 18px;
+  text-align:center;
+  font-size: 0.9rem;
+}
+
+/* ======================================================
+   Additions for Home page, hero, stats, features, toast
+   ====================================================== */
+
+/* Hero layout used in Home.jsx */
+.home-hero {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  gap: 20px;
+  align-items: center;
+}
+@media (max-width: 920px) {
+  .home-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Hero headline tweaks */
+.home-hero .headline {
+  font-size: 2rem;
+  line-height: 1.05;
+  margin: 0;
+  color: #0f172a;
+}
+.home-hero .subhead {
+  margin-top: 10px;
+  color: var(--muted);
+}
+
+/* CTA group spacing */
+.home-hero .cta {
+  display:flex;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+/* Stats / quick card */
+.stats-grid {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.stat {
+  display:flex;
+  flex-direction:column;
+  gap: 6px;
+  min-width: 80px;
+  text-align: center;
+}
+.stat .label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.stat .value {
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/* Feature grid (Why vote) */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 920px) {
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.feature-card {
+  padding: 14px;
+  border-radius: 10px;
+  box-shadow: none;
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+.feature-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 10px 30px rgba(16,24,40,0.06);
+}
+
+/* 4-step process */
+.steps {
+  display: flex;
+  gap: 12px;
+}
+.step {
+  flex: 1;
+  padding: 12px;
+  border-radius: 8px;
+  background: linear-gradient(180deg,#fff,#fbfdff);
+  border: 1px solid #eef2ff;
+}
+.step .title { font-weight: 700; }
+.step .desc { color: var(--muted); margin-top: 6px; }
+
+/* Recent elections list tweaks */
+.recent-list .list a {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap: 12px;
+  padding: 12px;
+}
+.recent-list .list a .meta { text-align: right; }
+
+/* Tiny responsive helpers */
+@media (max-width: 640px) {
+  .cta { flex-direction: column; }
+  .stats-grid { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .stat { text-align: left; }
+}
+
+/* Toast / success popup used in Login/Register */
+.toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 28px;
+  background: linear-gradient(180deg,#fff,#f8fffb);
+  border: 1px solid rgba(34,197,94,0.15);
+  box-shadow: 0 6px 18px rgba(16,24,40,0.08);
+  padding: 12px 18px;
+  border-radius: 10px;
+  color: #065f46;
+  font-weight: 700;
+  z-index: 9999;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  animation: toast-in .22s ease forwards;
+}
+
+/* Toast enter animation */
+@keyframes toast-in {
+  from { transform: translateX(-50%) translateY(8px); opacity: 0; }
+  to   { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+
+/* Subtle fade animation for hero elements */
+.fade-in {
+  opacity: 0;
+  transform: translateY(6px);
+  animation: fade-up .42s ease forwards;
+}
+.fade-in.delay-1 { animation-delay: .08s; }
+.fade-in.delay-2 { animation-delay: .16s; }
+@keyframes fade-up {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Small list hover */
+.list a:hover { background: #f8fafc; border-color: #e6f0ff; }
+
+/* Accessibility - focus outlines */
+a:focus, button:focus, input:focus, select:focus, textarea:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.10);
+  border-radius: 8px;
+}
+
+/* Utility: center container used by hero stats */
+.center-max {
+  max-width: var(--max-width);
+  margin: 0 auto;
+}
+
+/* Small visual polish for vote-card inside hero */
+.vote-card.small {
+  padding: 10px;
+  border-radius: 10px;
+}
+
+/* Ensure hero columns collapse nicely if inline style used */
+@media (max-width: 920px) {
+  .card.home-hero, .card.home-hero .home-hero {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* End of additions */
