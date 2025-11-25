@@ -1,4 +1,3 @@
-// client/src/App.jsx
 import React from 'react';
 import { Link, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home';
@@ -11,34 +10,60 @@ import './index.css';
 export default function App() {
   return (
     <div className="app">
+      {/* NAVBAR */}
       <nav className="app-nav">
         <div className="nav-inner">
+          {/* Left: logo + brand */}
           <div className="brand">
-            <div className="logo">V</div>
-            <div>Heritage Voting</div>
+            <div className="brand-logo">V</div>
+            <div className="brand-text">
+              <div className="brand-title">VoteX</div>
+              <div className="brand-subtitle">Online Voting System</div>
+            </div>
           </div>
-          <div className="nav-links">
+
+          {/* Center: links like first image */}
+          <div className="nav-center">
             <Link to="/">Home</Link>
-            <Link to="/elections">Elections</Link>
-            <Link to="/login">Login</Link>
+            <a href="#about">About</a>
+            <a href="elections">Elections</a>
+            <a href="#contact">Contact</a>
+          </div>
+
+          {/* Right: Login / Register buttons */}
+          <div className="nav-auth">
+            <Link to="/login" className="btn nav-login">
+              Login
+            </Link>
+            <Link to="/register" className="btn nav-register">
+              Register
+            </Link>
           </div>
         </div>
       </nav>
 
+      {/* PAGE CONTENT */}
       <div className="container">
-        {/* Routes — make sure these page components exist */}
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/elections" element={<Elections />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/elections" element={<Elections />} />
           <Route path="/elections/:id" element={<ElectionDetail />} />
-          {/* Fallback route */}
-          <Route path="*" element={<div style={{padding:40}}><h2>Page not found</h2></div>} />
+          <Route
+            path="*"
+            element={
+              <div style={{ padding: 40 }}>
+                <h2>Page not found</h2>
+              </div>
+            }
+          />
         </Routes>
       </div>
 
-      <footer className="footer">© {new Date().getFullYear()} Online Voting</footer>
+      <footer className="footer">
+        © {new Date().getFullYear()} Online Voting
+      </footer>
     </div>
   );
 }
