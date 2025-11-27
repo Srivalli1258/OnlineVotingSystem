@@ -1,121 +1,94 @@
-// client/src/pages/Register.jsx
-import React, { useState, useContext } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
+import React, { useState, useContext } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import api from "../api/axios";
+import { AuthContext } from "../context/AuthContext";
 
-export default function Register(){
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [role, setRole] = useState('voter'); // default
-  const [adminCode, setAdminCode] = useState(''); // optional client-side guard
-  const [error, setError] = useState('');
+export default function Register() {
+  const navigate = useNavigate();
+  const auth = useContext(AuthContext);
+
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState("voter");
+  const [adminCode, setAdminCode] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const { register } = useContext(AuthContext);
-  const nav = useNavigate();
-
-  async function handle(e){
+  async function submitForm(e) {
     e.preventDefault();
-    setError('');
+    setError("");
+    if (!name.trim()) return setError("Full name is required");
+    if (!email.trim()) return setError("Email is required");
+    if (!password || password.length < 6) return setError("Password must be at least 6 characters");
+    if (role === "admin" && !adminCode.trim()) return setError("Admin code required");
+
     setLoading(true);
-
-    // Optional client-side check: require admin code to choose admin role.
-    // This is only UX-level — you MUST also enforce on server.
-    if (role === 'admin' && !adminCode.trim()) {
-      setError('Admin code required to register as admin');
-      setLoading(false);
-      return;
-    }
-
     try {
-      await register({ name, email, password, role, adminCode });
-      nav('/login');
-    } catch(err) {
-      setError(err?.response?.data?.message || err?.message || 'Registration failed');
+      if (auth && typeof auth.register === "function") {
+        await auth.register({ name, email, password, role, adminCode });
+      } else {
+        // fallback API call
+        const res = await api.post("/auth/register", { name, email, password, role, adminCode });
+        // server may return token/user - but keep UX simple: navigate to login
+        if (res.status === 201 || res.status === 200) {
+          // optional: store token if returned (not required)
+          const token = res.data?.token;
+          const user = res.data?.user;
+          if (token) {
+            localStorage.setItem("token", token);
+            if (user) localStorage.setItem("user", JSON.stringify(user));
+          }
+        }
+      }
+
+      navigate("/login");
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || "Registration failed");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="card" style={{ maxWidth: 520, margin: '28px auto' }}>
-      <h1 className="h1">Create your account</h1>
-      <p className="note">Fill in the details to register.</p>
+    <div className="auth-shell">
+      <div className="auth-card card">
+        <h1 className="auth-title">Create account</h1>
+        <p className="note">Register as a voter or candidate to participate.</p>
 
-      <form onSubmit={handle} style={{ marginTop: 16 }}>
-        <div className="form-row">
-          <label className="form-label">Full Name</label>
-          <input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="John Doe"
-            required
-          />
-        </div>
+        {error && <div className="alert error" role="alert">{error}</div>}
 
-        <div className="form-row">
-          <label className="form-label">Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            required
-          />
-        </div>
+        <form onSubmit={submitForm} className="auth-form">
+          <label className="form-label">Full name</label>
+          <input value={name} onChange={e => setName(e.target.value)} className="field" placeholder="John Doe" required />
 
-        <div className="form-row">
-          <label className="form-label">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="••••••••"
-            required
-          />
-        </div>
+          <label className="form-label" style={{ marginTop: 12 }}>Email</label>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="field" placeholder="you@example.com" required />
 
-        <div className="form-row">
-          <label className="form-label">Role</label>
-          <select value={role} onChange={e => setRole(e.target.value)}>
+          <label className="form-label" style={{ marginTop: 12 }}>Password</label>
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="field" placeholder="At least 6 characters" required />
+
+          <label className="form-label" style={{ marginTop: 12 }}>Role</label>
+          <select value={role} onChange={e => setRole(e.target.value)} className="field">
             <option value="voter">Voter</option>
             <option value="candidate">Candidate</option>
             <option value="admin">Admin</option>
           </select>
-        </div>
 
-        {/* optional: show an admin code field when Admin is selected */}
-        {role === 'admin' && (
-          <div className="form-row">
-            <label className="form-label">Admin code (required)</label>
-            <input
-              value={adminCode}
-              onChange={e => setAdminCode(e.target.value)}
-              placeholder="Enter admin invite code"
-              required
-            />
-            <div className="note" style={{ marginTop: 6 }}>
-              Registering as admin should be restricted. Server must validate this code or your own admin-creation flow.
-            </div>
+          {role === "admin" && (
+            <>
+              <label className="form-label" style={{ marginTop: 12 }}>Admin invite code</label>
+              <input value={adminCode} onChange={e => setAdminCode(e.target.value)} className="field" placeholder="Admin code" />
+              <div className="note" style={{ marginTop: 6 }}>Server must validate admin codes — client-side check only for UX.</div>
+            </>
+          )}
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
+            <button className="btn" type="submit" disabled={loading}>{loading ? "Registering…" : "Register"}</button>
+            <Link to="/login" className="link-inline">Have an account? Sign in</Link>
           </div>
-        )}
-
-        {error && <div className="message" role="alert" style={{ marginTop: 8 }}>{error}</div>}
-
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop: 16 }}>
-          <button className="btn" type="submit" disabled={loading}>
-            {loading ? 'Registering…' : 'Register'}
-          </button>
-
-          <div className="note" style={{ fontSize: 14 }}>
-            Already have an account?{' '}
-            <Link to="/login" style={{ color: 'var(--accent-600)', fontWeight: 600 }}>
-              Login
-            </Link>
-          </div>
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }

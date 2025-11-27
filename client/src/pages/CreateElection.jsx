@@ -1,110 +1,83 @@
-
+// client/src/pages/CreateElection.jsx
 import React, { useState, useContext } from 'react';
-import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 import { AuthContext } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 export default function CreateElection() {
-  const { user } = useContext(AuthContext);
-  const navigate = useNavigate();
-
-  // Redirect non-admin/non-user (optional safety)
-  if (!user) {
-    // not logged in
-  }
-
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [startAt, setStartAt] = useState('');
   const [endAt, setEndAt] = useState('');
-  const [isPublic, setIsPublic] = useState(true);
-  const [allowedVotersText, setAllowedVotersText] = useState(''); // comma separated emails or ids
+  const [candidateEligibility, setCandidateEligibility] = useState('');
+  const [eligibility, setEligibility] = useState(''); // voter eligibility if needed
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
+  const { user } = useContext(AuthContext);
+  const nav = useNavigate();
 
-  // Helper to parse allowed voters input into array (optional: convert emails to ids on backend)
-  const parseAllowed = (text) =>
-    text.split(',').map(s => s.trim()).filter(Boolean);
-
-  async function handleSubmit(e) {
+  async function handleCreate(e) {
     e.preventDefault();
-    setError('');
+    setError(null);
+    if (!title) return setError('Title is required');
     setLoading(true);
+
     try {
       const payload = {
         title,
         description,
         startAt: startAt || undefined,
         endAt: endAt || undefined,
-        isPublic,
-        allowedVoters: parseAllowed(allowedVotersText) // depends on backend expectations
+        candidateEligibility,
+        eligibility
       };
+
       const res = await api.post('/elections', payload);
-      // res.data should be the created election
       setLoading(false);
-      // navigate to election details page OR the elections list
-      navigate(`/elections/${res.data._id || res.data.id || res.data._doc?._id}`);
+      nav(`/elections/${res.data.election._id}`);
     } catch (err) {
       setLoading(false);
-      setError(err.response?.data?.message || err.message || 'Failed to create');
+      setError(err?.response?.data?.message || 'Create failed');
     }
   }
 
+  if (!user || String(user.role).toLowerCase() !== 'admin') {
+    return <div className="message error">Only admins can create elections.</div>;
+  }
+
   return (
-    <div className="container" style={{ maxWidth: 800 }}>
-      <div className="card">
-        <h1 className="h1">Create Election</h1>
-        <form onSubmit={handleSubmit}>
-          <div className="form-row">
-            <label className="form-label">Title</label>
-            <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Election title" required />
-          </div>
+    <div className="card" style={{ maxWidth: 720 }}>
+      <h2>Create Election</h2>
+      {error && <div className="message error">{error}</div>}
+      <form onSubmit={handleCreate}>
+        <label>Title</label>
+        <input value={title} onChange={e => setTitle(e.target.value)} className="input" required />
 
-          <div className="form-row">
-            <label className="form-label">Description</label>
-            <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Short description" rows={4} />
-          </div>
+        <label>Description</label>
+        <textarea value={description} onChange={e => setDescription(e.target.value)} className="input" />
 
-          <div className="grid cols-2" style={{ alignItems: 'start' }}>
-            <div>
-              <div className="form-row">
-                <label className="form-label">Start (optional)</label>
-                <input type="datetime-local" value={startAt} onChange={e=>setStartAt(e.target.value)} />
-              </div>
-              <div className="form-row">
-                <label className="form-label">End (optional)</label>
-                <input type="datetime-local" value={endAt} onChange={e=>setEndAt(e.target.value)} />
-              </div>
-            </div>
+        <label>Start At</label>
+        <input type="datetime-local" value={startAt} onChange={e => setStartAt(e.target.value)} className="input" />
 
-            <div>
-              <div className="form-row">
-                <label className="form-label">Public</label>
-                <select value={isPublic ? 'true' : 'false'} onChange={e=>setIsPublic(e.target.value === 'true')}>
-                  <option value="true">Public (any registered voter)</option>
-                  <option value="false">Restricted (only listed voters)</option>
-                </select>
-              </div>
+        <label>End At</label>
+        <input type="datetime-local" value={endAt} onChange={e => setEndAt(e.target.value)} className="input" />
 
-              {!isPublic && (
-                <div className="form-row">
-                  <label className="form-label">Allowed voters (emails or ids comma-separated)</label>
-                  <textarea value={allowedVotersText} onChange={e=>setAllowedVotersText(e.target.value)} placeholder="alice@example.com, bob@example.com" />
-                </div>
-              )}
-            </div>
-          </div>
+        <label>Candidate Eligibility (rules for who may run)</label>
+        <textarea
+          value={candidateEligibility}
+          onChange={e => setCandidateEligibility(e.target.value)}
+          placeholder="e.g., Must be 25+, resident of constituency, not convicted of offense..."
+          className="input"
+          rows={4}
+        />
 
-          <div style={{ marginTop: 14 }}>
-            <button className="btn" type="submit" disabled={loading}>
-              {loading ? 'Posting…' : 'Create Election'}
-            </button>
-            <button type="button" className="btn secondary" onClick={()=>navigate('/elections')} style={{ marginLeft: 10 }}>Cancel</button>
-          </div>
+        <label>Voter Eligibility (optional)</label>
+        <input value={eligibility} onChange={e => setEligibility(e.target.value)} className="input" />
 
-          {error && <div className="message" style={{ marginTop: 12 }}>{error}</div>}
-        </form>
-      </div>
+        <div style={{ marginTop: 12 }}>
+          <button className="btn" type="submit" disabled={loading}>{loading ? 'Creating…' : 'Create Election'}</button>
+        </div>
+      </form>
     </div>
   );
 }

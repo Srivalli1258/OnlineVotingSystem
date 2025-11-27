@@ -7,10 +7,10 @@ import {
   listElections,
   getElection,
   addCandidate,
-  getResults
+  getResults,
+  participateAndRegister
 } from '../controllers/electionController.js';
 import { castVote } from '../controllers/voteController.js';
-
 const router = express.Router();
 
 /**
@@ -43,16 +43,21 @@ router.param('id', (req, res, next, id) => {
   next();
 });
 
+router.get('/:id', wrap(getElection));
 // Get election details (must be authenticated)
-router.get('/:id', requireAuth, wrap(getElection));
+//router.get('/:id', requireAuth, wrap(getElection));
 
 // Add candidate to election (creator or admin only — controller enforces authorization)
-router.post('/:id/candidates', requireAuth, wrap(addCandidate));
+router.post('/:id/candidates', requireAuth, addCandidate);
 
 // Cast vote in election
 router.post('/:id/vote', requireAuth, wrap(castVote));
 
 // Get results (admin only — controller enforces authorization)
 router.get('/:id/results', requireAuth, wrap(getResults));
+
+router.post('/:id/candidates/participate', requireAuth, wrap(participateAndRegister));
+
+router.post('/:id/vote', requireAuth, wrap(castVote));
 
 export default router;

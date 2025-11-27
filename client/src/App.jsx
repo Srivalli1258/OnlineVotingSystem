@@ -13,36 +13,35 @@ export default function App() {
       {/* NAVBAR */}
       <nav className="app-nav">
         <div className="nav-inner">
-          {/* Left: logo + brand */}
           <div className="brand">
-            <div className="brand-logo">V</div>
+            <div className="logo-crop">
+              <img
+                src="https://t4.ftcdn.net/jpg/01/57/93/42/240_F_1579342417_JN4bqU0sHk0cslwZncXcOGQnVfdE9xuJ.jpg"
+                alt="Logo"
+                className="brand-logo"
+              />
+            </div>
+
             <div className="brand-text">
               <div className="brand-title">VoteX</div>
               <div className="brand-subtitle">Online Voting System</div>
             </div>
           </div>
 
-          {/* Center: links like first image */}
           <div className="nav-center">
             <Link to="/">Home</Link>
-            <a href="#about">About</a>
-            <a href="elections">Elections</a>
-            <a href="#contact">Contact</a>
+            <Link to="/about">About</Link>
+            <Link to="/elections">Elections</Link>
+            <Link to="/contact">Contact</Link>
           </div>
 
-          {/* Right: Login / Register buttons */}
           <div className="nav-auth">
-            <Link to="/login" className="btn nav-login">
-              Login
-            </Link>
-            <Link to="/register" className="btn nav-register">
-              Register
-            </Link>
+            <Link to="/login" className="btn nav-login">Login</Link>
+            <Link to="/register" className="btn nav-register">Register</Link>
           </div>
         </div>
       </nav>
 
-      {/* PAGE CONTENT */}
       <div className="container">
         <Routes>
           <Route path="/" element={<Home />} />
@@ -50,19 +49,12 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/elections/:id" element={<ElectionDetail />} />
-          <Route
-            path="*"
-            element={
-              <div style={{ padding: 40 }}>
-                <h2>Page not found</h2>
-              </div>
-            }
-          />
+          <Route path="*" element={<div style={{ padding: 40 }}><h2>Page not found</h2></div>} />
         </Routes>
       </div>
 
       <footer className="footer">
-        © {new Date().getFullYear()} Online Voting
+        © {new Date().getFullYear()} VoteX — Make your voice count
       </footer>
     </div>
   );
