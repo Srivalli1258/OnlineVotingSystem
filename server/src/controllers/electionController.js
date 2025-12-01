@@ -172,99 +172,55 @@ export async function getElection(req, res, next) {
  * - Admins can add arbitrary candidates
  * - Users with role 'candidate' can register themselves (only once)
  */
-export async function addCandidate(req, res) {
+
+// POST /api/elections/:id/candidates
+// server/src/controllers/electionController.js
+
+export async function addCandidate(req, res, next) {
   try {
-    const { id } = req.params; // election ID
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'Invalid election id' });
 
-    const {
-      name,
-      age,
-      party,
-      symbol,
-      manifesto,
-      schemes,
-      description
-    } = req.body;
-
-    if (!req.user) {
-      return res.status(401).json({ message: "Login required" });
-    }
-
-    // Validate required fields
-    if (!name || !age || !party || !manifesto) {
-      return res.status(400).json({ message: "All required fields missing" });
-    }
-
-    // Fetch election
     const election = await Election.findById(id);
-    if (!election) return res.status(404).json({ message: "Election not found" });
+    if (!election) return res.status(404).json({ message: 'Election not found' });
 
-    // Create candidate object
-    const newCandidate = {
-      name,
-      age,
-      party,
-      symbol,
-      manifesto,
-      description,
-      schemes: schemes || [],
-      createdBy: req.user._id
+    // Basic eligibility check example — admin sets election.candidateEligibility string
+    // You can parse rules more thoroughly
+    const { name, age, manifesto, schemes } = req.body;
+    if (!name || name.trim().length === 0) return res.status(400).json({ message: 'Name required' });
+
+    // Example eligibility: if election.candidateEligibility contains "minAge:18"
+    if (election.candidateEligibility) {
+      const m = election.candidateEligibility.match(/minAge:(\d+)/);
+      if (m && Number(m[1]) > 0) {
+        const minAge = Number(m[1]);
+        if (!age || Number(age) < minAge) {
+          return res.status(400).json({ message: `Minimum age to participate is ${minAge}`, eligible: false });
+        }
+      }
+    }
+
+    // Add candidate to nested array
+    const cand = {
+      name: name.trim(),
+      description: manifesto || '',
+      manifesto: manifesto || '',
+      schemes: Array.isArray(schemes) ? schemes : (schemes ? [schemes] : []),
+      createdBy: req.user?._id
     };
 
-    // Push to election
-    election.candidates.push(newCandidate);
-
+    election.candidates.push(cand);
     await election.save();
 
-    const savedCandidate =
-      election.candidates[election.candidates.length - 1];
+    // return last inserted candidate (Mongoose gives _id)
+    const added = election.candidates[election.candidates.length - 1];
 
-    return res.status(201).json({
-      message: "Candidate registered successfully",
-      candidate: savedCandidate
-    });
-
+    return res.status(201).json({ message: 'Candidate registered', candidate: added, eligible: true });
   } catch (err) {
-    console.error("addCandidate error:", err);
-    res.status(500).json({ message: "Server error" });
+    console.error('addCandidate error', err);
+    return next(err);
   }
 }
-
-/**
- * Get results (admin only)
- */
-export async function getResults(req, res, next) {
-  try {
-    const electionId = req.params.id;
-    if (!mongoose.isValidObjectId(electionId)) return res.status(400).json({ message: 'Invalid' });
-
-    // only admin allowed
-    if (!req.user || req.user.role !== 'admin') return res.status(403).json({ message: 'Admin only' });
-
-    const counts = await Vote.aggregate([
-      { $match: { election: new mongoose.Types.ObjectId(electionId) } },
-      { $group: { _id: '$candidate', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
-    ]);
-
-    const populated = await Promise.all(counts.map(async c => {
-      const cand = await Candidate.findById(c._id).select('name').lean();
-      return { candidate: cand ? { id: cand._id, name: cand.name } : { id: c._id, name: 'Unknown' }, count: c.count };
-    }));
-
-    res.json({ results: populated });
-  } catch (err) {
-    next(err);
-  }
-}
-
-export default {
-  createElection,
-  listElections,
-  getElection,
-  addCandidate,
-  getResults,
-};
 
 
 // Participate + infer schemes from manifesto
@@ -405,3 +361,31 @@ export async function participateAndRegister(req, res, next) {
     next(err);
   }
 }
+export async function getResults(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'Invalid election id' });
+
+    // aggregate votes by candidate
+    const agg = await Vote.aggregate([
+      { $match: { election: mongoose.Types.ObjectId(id) } },
+      { $group: { _id: '$candidate', count: { $sum: 1 } } },
+    ]);
+
+    // Convert to candidateId->count mapping or array
+    const results = (agg || []).map(r => ({ candidateId: String(r._id), count: r.count }));
+
+    return res.json({ results });
+  } catch (err) {
+    console.error('getResults error', err);
+    return next(err);
+  }
+}
+
+export default {
+  listElections,
+  getElection,
+  createElection,
+  addCandidate,
+  getResults
+};

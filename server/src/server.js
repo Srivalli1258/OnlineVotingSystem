@@ -24,7 +24,6 @@ app.use(rateLimit({ windowMs: 60 * 1000, max: 100 }));
 // ROUTES
 app.use('/api', routes);
 app.use(errorHandler);
-
 // --- FIXED MONGO URI LOADING --- //
 let mongoURI = process.env.MONGO_URI;
 

@@ -10,7 +10,7 @@ import {
   getResults,
   participateAndRegister
 } from '../controllers/electionController.js';
-import { castVote } from '../controllers/voteController.js';
+import { castVote } from "../controllers/voteController.js";
 const router = express.Router();
 
 /**
@@ -51,8 +51,7 @@ router.get('/:id', wrap(getElection));
 router.post('/:id/candidates', requireAuth, addCandidate);
 
 // Cast vote in election
-router.post('/:id/vote', requireAuth, wrap(castVote));
-
+router.post("/:id/vote", castVote);
 // Get results (admin only — controller enforces authorization)
 router.get('/:id/results', requireAuth, wrap(getResults));
 

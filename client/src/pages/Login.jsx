@@ -1,112 +1,194 @@
-import React, { useState, useContext, useRef, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+// client/src/components/LoginPage.jsx
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
-import { AuthContext } from "../context/AuthContext";
 
-export default function Login() {
+export default function LoginPage() {
   const navigate = useNavigate();
-  const auth = useContext(AuthContext); // may be undefined in your project depending on setup
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [successToast, setSuccessToast] = useState(false);
+  const [adminForm, setAdminForm] = useState({ employeeId: "", password: "" });
+  const [voterForm, setVoterForm] = useState({ aadhar: "", password: "" });
 
-  const emailRef = useRef(null);
-  const passRef = useRef(null);
-  const timerRef = useRef(null);
+  const [loadingAdmin, setLoadingAdmin] = useState(false);
+  const [loadingVoter, setLoadingVoter] = useState(false);
 
-  useEffect(() => {
-    // focus email on mount
-    emailRef.current?.focus();
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, []);
+  const [errorAdmin, setErrorAdmin] = useState("");
+  const [errorVoter, setErrorVoter] = useState("");
 
-  async function submitForm(e) {
-    e.preventDefault();
-    setError("");
-    if (!email.trim()) { setError("Email is required"); emailRef.current?.focus(); return; }
-    if (!password) { setError("Password is required"); passRef.current?.focus(); return; }
-
-    setLoading(true);
+  // small helper to dispatch a cross-component event so Navbar can update immediately
+  function notifyUserChanged(user) {
     try {
-      // prefer AuthContext.login if supplied
-      if (auth && typeof auth.login === "function") {
-        await auth.login({ email, password });
-      } else {
-        // fallback direct API call
-        const res = await api.post("/auth/login", { email, password });
-        const token = res.data?.token;
-        const user = res.data?.user || null;
-        if (token) {
-          localStorage.setItem("token", token);
-          if (user) localStorage.setItem("user", JSON.stringify(user));
-        } else {
-          throw new Error("No token returned from server");
-        }
+      window.dispatchEvent(new CustomEvent("user-changed", { detail: user }));
+    } catch (e) {
+      // ignore if browser doesn't support CustomEvent (very rare)
+    }
+  }
+
+  async function handleAdminLogin(e) {
+    e.preventDefault();
+    setErrorAdmin("");
+
+    const employeeId = String(adminForm.employeeId || "").trim();
+    const password = adminForm.password || "";
+
+    if (!employeeId) return setErrorAdmin("Employee Id is required");
+    if (!password) return setErrorAdmin("Password is required");
+
+    setLoadingAdmin(true);
+    try {
+      const res = await api.post("/auth/login", {
+        aadhar: employeeId,
+        password,
+        isAdmin: true
+      });
+
+      const { token, user } = res.data || {};
+      if (!user || user.role !== "admin") {
+        setErrorAdmin("This account does not have admin access.");
+        setLoadingAdmin(false);
+        return;
       }
 
-      setSuccessToast(true);
-      timerRef.current = setTimeout(() => {
-        setSuccessToast(false);
-        navigate("/elections");
-      }, 900);
+      // persist token & user
+      if (token) localStorage.setItem("token", token);
+      if (user) localStorage.setItem("user", JSON.stringify(user));
 
+      // notify other components
+      notifyUserChanged(user);
+
+      navigate("/admin/dashboard");
     } catch (err) {
-      const msg = err?.response?.data?.message || err?.message || "Login failed";
-      setError(msg);
+      setErrorAdmin(err?.response?.data?.message || err?.message || "Login failed");
     } finally {
-      setLoading(false);
+      setLoadingAdmin(false);
+    }
+  }
+
+  async function handleVoterLogin(e) {
+    e.preventDefault();
+    setErrorVoter("");
+
+    const aadhar = String(voterForm.aadhar || "").trim();
+    const password = voterForm.password || "";
+
+    if (!aadhar) return setErrorVoter("Aadhaar Number is required");
+    // basic Aadhaar validation: 12 digits
+    if (!/^\d{12}$/.test(aadhar)) return setErrorVoter("Aadhaar must be 12 digits");
+
+    if (!password) return setErrorVoter("Password is required");
+
+    setLoadingVoter(true);
+    try {
+      const res = await api.post("/auth/login", {
+        aadhar,
+        password,
+        isAdmin: false
+      });
+
+      const { token, user } = res.data || {};
+      if (!user || (user.role !== "voter" && user.role !== "candidate" && user.role !== "admin")) {
+        setErrorVoter("Account role not allowed here");
+        setLoadingVoter(false);
+        return;
+      }
+
+      if (token) localStorage.setItem("token", token);
+      if (user) localStorage.setItem("user", JSON.stringify(user));
+
+      // notify other components (Navbar)
+      notifyUserChanged(user);
+
+      // redirect: admins to admin dashboard, others to home
+      if (user.role === "admin") navigate("/admin/dashboard");
+      else navigate("/");
+    } catch (err) {
+      setErrorVoter(err?.response?.data?.message || err?.message || "Login failed");
+    } finally {
+      setLoadingVoter(false);
     }
   }
 
   return (
-    <div className="auth-shell">
-      <div className="auth-card card">
-        <h1 className="auth-title">Welcome back</h1>
-        <p className="note">Sign in to access elections and cast your vote.</p>
-
-        {error && <div className="alert error" role="alert">{error}</div>}
-
-        <form onSubmit={submitForm} className="auth-form">
-          <label className="form-label">Email</label>
-          <input
-            ref={emailRef}
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            className="field"
-            aria-label="email"
-            required
-          />
-
-          <label className="form-label" style={{ marginTop: 12 }}>Password</label>
-          <input
-            ref={passRef}
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="••••••••"
-            className="field"
-            aria-label="password"
-            required
-          />
-
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
-            <button className="btn" type="submit" disabled={loading}>
-              {loading ? "Signing in…" : "Sign in"}
-            </button>
-
-            <Link to="/register" className="link-inline">Create account</Link>
+    <div className="lv-page login-page">
+      <header className="lv-header">
+        <div className="lv-header-inner">
+          <div className="lv-logo">
+            <img src="/assets/logo.png" alt="Logo" style={{ height: 44 }} onError={(e) => (e.target.style.display = "none")} />
           </div>
-        </form>
-      </div>
+          <div className="lv-title">Your Vote. Your Voice.</div>
+        </div>
+      </header>
 
-      {successToast && (
-        <div className="toast success" role="status" aria-live="polite">Login successful ✅</div>
-      )}
+      <main className="lv-main">
+        <div className="lv-content">
+          <div className="lv-card">
+            <div className="lv-cards-grid">
+              {/* Admin Login */}
+              <div className="lv-box">
+                <h4 className="lv-box-title">Admin Login</h4>
+                {errorAdmin && <div className="lv-alert">{errorAdmin}</div>}
+                <form onSubmit={handleAdminLogin} className="lv-form" noValidate>
+                  <label className="lv-label">Employee Id</label>
+                  <input
+                    className="lv-input"
+                    value={adminForm.employeeId}
+                    onChange={(e) => setAdminForm({ ...adminForm, employeeId: e.target.value })}
+                    placeholder="Enter Employee ID"
+                    autoComplete="username"
+                  />
+
+                  <label className="lv-label">Password</label>
+                  <input
+                    type="password"
+                    className="lv-input"
+                    value={adminForm.password}
+                    onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })}
+                    placeholder="Enter Admin Password"
+                    autoComplete="current-password"
+                  />
+
+                  <button type="submit" className="lv-submit" disabled={loadingAdmin}>
+                    {loadingAdmin ? "Signing..." : "Login"}
+                  </button>
+                </form>
+              </div>
+
+              {/* Voter Login */}
+              <div className="lv-box">
+                <h4 className="lv-box-title">Voter/Candidate Login</h4>
+                {errorVoter && <div className="lv-alert">{errorVoter}</div>}
+                <form onSubmit={handleVoterLogin} className="lv-form" noValidate>
+                  <label className="lv-label">Aadhaar Number</label>
+                  <input
+                    className="lv-input"
+                    value={voterForm.aadhar}
+                    onChange={(e) => setVoterForm({ ...voterForm, aadhar: e.target.value })}
+                    placeholder="Enter Aadhaar Number"
+                    inputMode="numeric"
+                    autoComplete="username"
+                  />
+
+                  <label className="lv-label">Password</label>
+                  <input
+                    type="password"
+                    className="lv-input"
+                    value={voterForm.password}
+                    onChange={(e) => setVoterForm({ ...voterForm, password: e.target.value })}
+                    placeholder="Enter Password"
+                    autoComplete="current-password"
+                  />
+
+                  <button type="submit" className="lv-submit" disabled={loadingVoter}>
+                    {loadingVoter ? "Signing..." : "Login"}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button className="lv-results" onClick={() => navigate("/results")}>Results</button>
+      </main>
     </div>
   );
 }

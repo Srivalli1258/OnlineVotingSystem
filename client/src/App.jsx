@@ -1,55 +1,67 @@
-import React from 'react';
-import { Link, Routes, Route } from 'react-router-dom';
-import Home from './pages/Home';
-import Elections from './pages/Elections';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import ElectionDetail from './pages/ElectionDetail';
-import './index.css';
+import React from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
+import Home from "./pages/Home";
+import Elections from "./pages/Elections";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import ElectionDetail from "./pages/ElectionDetail";
+import CreateElection from "./pages/CreateElection";
+import Navbar from "./components/Navbar";
+import About from "./pages/about";
+import "./index.css";
+
+function ProtectedRoute({ children }) {
+  const token = localStorage.getItem("token");
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
+}
 
 export default function App() {
   return (
     <div className="app">
-      {/* NAVBAR */}
-      <nav className="app-nav">
-        <div className="nav-inner">
-          <div className="brand">
-            <div className="logo-crop">
-              <img
-                src="https://t4.ftcdn.net/jpg/01/57/93/42/240_F_1579342417_JN4bqU0sHk0cslwZncXcOGQnVfdE9xuJ.jpg"
-                alt="Logo"
-                className="brand-logo"
-              />
-            </div>
-
-            <div className="brand-text">
-              <div className="brand-title">VoteX</div>
-              <div className="brand-subtitle">Online Voting System</div>
-            </div>
-          </div>
-
-          <div className="nav-center">
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-            <Link to="/elections">Elections</Link>
-            <Link to="/contact">Contact</Link>
-          </div>
-
-          <div className="nav-auth">
-            <Link to="/login" className="btn nav-login">Login</Link>
-            <Link to="/register" className="btn nav-register">Register</Link>
-          </div>
-        </div>
-      </nav>
+      <Navbar />
 
       <div className="container">
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/elections" element={<Elections />} />
+
+          {/* 🔒 Protected Elections Page */}
+          <Route
+            path="/elections"
+            element={
+              <ProtectedRoute>
+                <Elections />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* 🔒 Protected Election Details */}
+          <Route
+            path="/elections/:id"
+            element={
+              <ProtectedRoute>
+                <ElectionDetail />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* 🔒 Protect create election too (optional for admin only) */}
+          <Route
+            path="/elections/create"
+            element={
+              <ProtectedRoute>
+                <CreateElection />
+              </ProtectedRoute>
+            }
+          />
+
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/elections/:id" element={<ElectionDetail />} />
-          <Route path="*" element={<div style={{ padding: 40 }}><h2>Page not found</h2></div>} />
+          <Route path="/about" element={<About />} />
+
+          <Route path="*" element={<h2>Page not found</h2>} />
         </Routes>
       </div>
 

@@ -1,95 +1,105 @@
 // server/src/controllers/voteController.js
-import mongoose from 'mongoose';
-import Election from '../models/Election.js';
-import Vote from '../models/Vote.js';
-import Candidate from '../models/Candidate.js';
+import mongoose from "mongoose";
+import AllowedVoter from "../models/AllowedVoter.js";
+import Vote from "../models/Vote.js";
+import Election from "../models/Election.js"; // adjust if your model filename differs
 
 /**
- * Cast a vote for a candidate in an election
- * POST /api/elections/:id/vote
- * Body: { candidateId }
+ * castVote
+ * - Accepts: POST /elections/:id/vote
+ * - Body: { candidateId, voterId, pin }
+ *
+ * Behavior:
+ * 1. Validate input
+ * 2. Ensure election exists and is open
+ * 3. Verify voterId exists in AllowedVoter and pin matches
+ * 4. Ensure voter hasn't already voted
+ * 5. Create Vote document and mark AllowedVoter.voted = true (transaction)
  */
-export async function castVote(req, res, next) {
+export async function castVote(req, res) {
   try {
-    const { id } = req.params; // election id
-    const { candidateId } = req.body;
+    const electionId = req.params.id;
+    const { candidateId, voterId, pin } = req.body;
 
-    if (!req.user) return res.status(401).json({ message: 'Authentication required' });
-
-    // allow voters and candidates to vote (adjust if you only want voters)
-    const role = String(req.user.role || '').toLowerCase();
-    if (!(role === 'voter' || role === 'candidate' || role === 'admin')) {
-      return res.status(403).json({ message: 'Only voters or candidates may cast a vote' });
+    if (!candidateId || !voterId || !pin) {
+      return res.status(400).json({ message: "candidateId, voterId and pin are required" });
     }
 
-    // Basic id validation
-    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'Invalid election id' });
-
-    // candidateId might be sent as an object; ensure it's a string id
-    let candId = candidateId;
-    if (typeof candidateId === 'object' && candidateId !== null) {
-      // try common shapes
-      candId = candidateId._id || candidateId.id || String(candidateId);
-    }
-    if (!mongoose.isValidObjectId(candId)) {
-      return res.status(400).json({ message: 'Invalid candidate id' });
-    }
-
-    // Use lean for read-only, but we'll not rely on mongoose document helpers when using lean()
-    const election = await Election.findById(id).lean();
-    if (!election) return res.status(404).json({ message: 'Election not found' });
+    // load election and check open/closed
+    const election = await Election.findById(electionId);
+    if (!election) return res.status(404).json({ message: "Election not found" });
 
     const now = new Date();
     if (election.startAt && now < new Date(election.startAt)) {
-      return res.status(400).json({ message: 'Election has not started' });
+      return res.status(400).json({ message: "Election has not started" });
     }
     if (election.endAt && now > new Date(election.endAt)) {
-      return res.status(400).json({ message: 'Election has ended' });
+      return res.status(400).json({ message: "Election is closed" });
     }
 
-    // Ensure candidate belongs to this election (check nested list)
-    const belongs = Array.isArray(election.candidates) &&
-      election.candidates.some(c => String(c._id) === String(candId));
+    // find allowed voter
+    const normalizedVoterId = String(voterId).trim();
+    const allowed = await AllowedVoter.findOne({ voterId: normalizedVoterId });
+    if (!allowed) return res.status(400).json({ message: "Invalid voterId or pin" });
 
-    // Also check Candidate collection if you persist candidates separately
-    const candidateDoc = await Candidate.findOne({ _id: candId, election: id }).lean();
-
-    if (!belongs && !candidateDoc) {
-      return res.status(400).json({ message: 'Candidate does not belong to this election' });
+    // plain-text pin compare (development). If you hashed pins, replace with bcrypt.compare
+    if (String(allowed.pin).trim() !== String(pin).trim()) {
+      return res.status(400).json({ message: "Invalid voterId or pin" });
     }
 
-    // Prevent duplicate votes by same user
-    const existing = await Vote.findOne({ election: id, voter: req.user._id }).lean();
-    if (existing) {
-      return res.status(400).json({ message: 'You have already voted in this election' });
+    if (allowed.voted) {
+      return res.status(400).json({ message: "This voter has already voted" });
     }
 
-    // Build Vote document with mongoose ObjectId wrappers (explicit `new` ensures no runtime error)
-    const vote = new Vote({
-      election: new mongoose.Types.ObjectId(id),
-      candidate: new mongoose.Types.ObjectId(candId),
-      voter: new mongoose.Types.ObjectId(req.user._id),
-      createdAt: new Date()
-    });
+    // use transaction if available (requires replica set). Fallback to non-transactional operations if not.
+    let session;
+    try {
+      session = await mongoose.startSession();
+      session.startTransaction();
 
-    await vote.save();
+      // create vote
+      await Vote.create([{
+        electionId: election._id,
+        candidateId,
+        voterId: allowed.voterId,
+        createdAt: new Date()
+      }], { session });
 
-    // Return counts (handy for UI)
-    const agg = await Vote.aggregate([
-      { $match: { election: new mongoose.Types.ObjectId(id) } },
-      { $group: { _id: '$candidate', count: { $sum: 1 } } }
-    ]);
+      // mark allowed voter as voted
+      allowed.voted = true;
+      allowed.votedAt = new Date();
+      await allowed.save({ session });
 
-    const counts = {};
-    for (const r of agg) counts[String(r._id)] = r.count;
+      await session.commitTransaction();
+      session.endSession();
+    } catch (txErr) {
+      if (session) {
+        try { await session.abortTransaction(); session.endSession(); } catch (e) {}
+      }
+      // If transaction fails due to replica set missing, attempt fallback (best-effort)
+      if (txErr.message && txErr.message.match(/transactions are not supported/)) {
+        // fallback: create vote then update allowed voter
+        await Vote.create({
+          electionId: election._id,
+          candidateId,
+          voterId: allowed.voterId,
+          createdAt: new Date()
+        });
+        allowed.voted = true;
+        allowed.votedAt = new Date();
+        await allowed.save();
+      } else {
+        console.error("Transaction error in castVote:", txErr);
+        return res.status(500).json({ message: "Server error during vote" });
+      }
+    }
 
-    return res.status(201).json({ message: 'Vote recorded', counts });
+    return res.json({ message: "Vote recorded" });
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('castVote error', err);
-    // Send non-sensitive error message
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("castVote error:", err);
+    return res.status(500).json({ message: "Server error" });
   }
 }
 
-export default { castVote };
+// optionally export same function under another name if other code imports it
+export { castVote as castVoteWithVoterPin };
