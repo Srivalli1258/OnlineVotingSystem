@@ -1,79 +1,69 @@
 // server/src/routes/elections.js
 import express from 'express';
 import mongoose from 'mongoose';
-import jwt from 'jsonwebtoken';
 
-import { adminAuth } from '../middleware/adminAuth.js'; // admin-only middleware
-import User from '../models/User.js'; // user model used by requireAuth
+// user auth middleware (verify voter/candidate)
+import { requireAuth } from '../middleware/authMiddleware.js';
 
-import {
-  createElection,
-  listElections,
-  getElection,
-  addCandidate,
-  getResults,
-  participateAndRegister
-} from '../controllers/electionController.js';
+// admin auth middleware (verify admin token)
+import { adminAuth } from '../middleware/adminAuth.js';
+
+// import whole controller module (works with named or default exports)
+import * as electionController from '../controllers/electionController.js';
 import { castVote } from '../controllers/voteController.js';
 
 const router = express.Router();
 
-/**
- * Minimal requireAuth middleware (local copy).
- * This mirrors your previous logic (verifies Bearer token, loads User by payload.id).
- * It avoids depending on an external import that might not exist.
- */
-export async function requireAuth(req, res, next) {
-  try {
-    const auth = req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer ')) {
-      return res.status(401).json({ message: 'No token' });
-    }
-    const token = auth.split(' ')[1];
-    const JWT_SECRET = process.env.JWT_SECRET || 'secretkey';
-
-    let payload;
-    try {
-      payload = jwt.verify(token, JWT_SECRET);
-    } catch (err) {
-      return res.status(401).json({ message: 'Invalid token' });
-    }
-
-    // payload.id is expected (your auth previously used payload.id)
-    const userId = payload.id || payload.sub || payload.userId || null;
-    if (!userId) return res.status(401).json({ message: 'Invalid token payload' });
-
-    const user = await User.findById(userId).select('-passwordHash');
-    if (!user) return res.status(401).json({ message: 'Invalid token - user not found' });
-
-    req.user = user;
-    next();
-  } catch (err) {
-    console.error('requireAuth error', err);
-    return res.status(401).json({ message: 'Unauthorized', error: err.message });
-  }
-}
-
-/**
- * Small helper to wrap async route handlers and forward errors to next()
- */
 const wrap = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// Keep static route before dynamic :id
+/**
+ * Helper: pick a handler from controller exports safely.
+ * Accepts:
+ *   - named export function (e.g. export function listElections...)
+ *   - default export object (e.g. export default { listElections: () => {} })
+ * If handler not found, returns a 501 handler that won't crash the server.
+ */
+function resolveHandler(exported, name) {
+  // if it's a function already, return it
+  if (typeof exported === 'function') return exported;
+
+  // try to find in the imported controller object
+  if (electionController && typeof electionController[name] === 'function') return electionController[name];
+
+  // try default export object (electionController.default)
+  if (electionController && electionController.default && typeof electionController.default[name] === 'function') {
+    return electionController.default[name];
+  }
+
+  // fallback: return a safe "not implemented" handler
+  return (req, res) => {
+    res.status(501).json({ message: `${name} not implemented on server` });
+  };
+}
+
+// static create route (frontend SPA handles actual creation UI)
 router.get('/create', (req, res) => {
   res.json({ message: 'Create election route (handled by frontend SPA)' });
 });
 
-// List elections (public)
-router.get('/', wrap(listElections));
+// resolve controller handlers safely
+const listFn = resolveHandler(electionController.listElections, 'listElections');
+const createFn = resolveHandler(electionController.createElection, 'createElection');
+const getFn = resolveHandler(electionController.getElection, 'getElection');
+const addCandFn = resolveHandler(electionController.addCandidate, 'addCandidate');
+const participateFn = resolveHandler(electionController.participateAndRegister, 'participateAndRegister');
+const resultsFn = resolveHandler(electionController.getResults, 'getResults');
 
-// Create election (admin-only)
-router.post('/', adminAuth, wrap(createElection));
+// Public list
+router.get('/', wrap(listFn));
+
+// Create election — admin only
+router.post('/', adminAuth, wrap(createFn));
 
 /**
- * Validate :id once using router.param — this keeps routes clean and DRY.
+ * :id validation once using router.param — keeps routes DRY.
  * If id is invalid we return 400 immediately.
  */
 router.param('id', (req, res, next, id) => {
@@ -83,22 +73,20 @@ router.param('id', (req, res, next, id) => {
   next();
 });
 
-// Get election (public, normalized)
-router.get('/:id', wrap(getElection));
+// Get election (public)
+router.get('/:id', wrap(getFn));
 
-// Add candidate to election (authenticated user)
-router.post('/:id/candidates', requireAuth, wrap(addCandidate));
+// Add candidate (user must be authenticated)
+router.post('/:id/candidates', requireAuth, wrap(addCandFn));
 
-// Backwards-compatible "apply" endpoint (some clients/old code use /:electionId/apply)
-router.post('/:id/apply', requireAuth, wrap(participateAndRegister));
-// Also keep new-style path under candidates if you prefer
-router.post('/:id/candidates/participate', requireAuth, wrap(participateAndRegister));
+// Backwards-compatible apply endpoint (user must be authenticated)
+router.post('/:id/apply', requireAuth, wrap(participateFn));
+router.post('/:id/candidates/participate', requireAuth, wrap(participateFn));
 
-// Cast vote (authenticated)
+// Cast vote (authenticated voters/candidates)
 router.post('/:id/vote', requireAuth, wrap(castVote));
 
-// Get results (admin-only)
-router.get('/:id/results', adminAuth, wrap(getResults));
+// Get results — admin only
+router.get('/:id/results', adminAuth, wrap(resultsFn));
 
 export default router;
-  

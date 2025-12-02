@@ -42,13 +42,18 @@ export default function LoginPage() {
         return flashError(setErrorAdmin, "Invalid response from server");
       }
 
-      // store token & admin for frontend use
       localStorage.setItem("adminToken", token);
-      localStorage.setItem("admin", JSON.stringify(admin));
-      // notify other parts of app
-      window.dispatchEvent(new CustomEvent("admin-changed", { detail: admin }));
+      localStorage.setItem("token", token);
 
-      // go to admin dashboard
+      // store admin metadata
+      localStorage.setItem("admin", JSON.stringify(admin));
+      // also store a 'user' object as admin to keep UI components (which read 'user') consistent
+      localStorage.setItem("user", JSON.stringify({ _id: admin._id, name: admin.name, role: "admin", employeeId: admin.employeeId }));
+
+      // notify other parts of app
+      try { window.dispatchEvent(new CustomEvent("admin-changed", { detail: admin })); } catch (e) {}
+      try { window.dispatchEvent(new CustomEvent("user-changed", { detail: { _id: admin._id, name: admin.name, role: "admin" } })); } catch (e) {}
+      // go to admin dashboard (your app's routing)
       navigate("/");
 
     } catch (err) {

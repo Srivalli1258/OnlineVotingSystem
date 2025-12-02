@@ -2,6 +2,7 @@
 import Election from '../models/Election.js';
 import Candidate from '../models/Candidate.js';
 import Vote from '../models/Vote.js';
+import User from '../models/User.js';
 import mongoose from 'mongoose';
 
 /**
@@ -257,173 +258,185 @@ export async function addCandidate(req, res, next) {
  * Participate + infer schemes from manifesto and register
  * POST /api/elections/:id/participate
  */
-export async function participateAndRegister(req, res, next) {
-  const session = await mongoose.startSession();
+// Example: server/src/controllers/electionController.js
+// Replace your existing participateAndRegister / participate handler with this.
+
+
+// Replace the existing participateAndRegister with this function
+// Paste this function into server/src/controllers/electionController.js
+export async function participateAndRegister(req, res) {
+  const electionId = req.params.id;
+  const payload = req.body || {};
+  const actorId = (req.admin && req.admin._id) || (req.user && req.user._id) || null;
+
+  // DEBUG: log incoming request (trim long bodies)
+  try { console.log('[DEBUG PARTICIPATE] incoming payload:', JSON.stringify(req.body).slice(0, 2000)); } catch(e){}
+
+  // Normalize name (accept name or fullName)
+  const fullName = (payload.fullName || payload.name || '').trim();
+  if (!fullName) {
+    return res.status(400).json({ message: 'Full name is required' });
+  }
+
+  // Aadhaar optional validation
+  const aadhaar = payload.aadhaar ? String(payload.aadhaar).trim() : null;
+  if (aadhaar && !/^\d{12}$/.test(aadhaar)) {
+    return res.status(400).json({ message: 'Aadhaar must be 12 digits' });
+  }
+
+  const address = payload.address ? String(payload.address).trim() : '';
+
+  // Non-transactional write helper (ensures awaited saves + logs)
+  async function doNonTransactional() {
+    const election = await Election.findById(electionId);
+    if (!election) throw { status: 404, message: 'Election not found' };
+
+    // Duplicate checks
+    if (actorId) {
+      const alreadyByUser = await Candidate.findOne({ election: electionId, createdBy: actorId }).lean();
+      if (alreadyByUser) throw { status: 409, message: 'You have already applied for this election' };
+    }
+    if (aadhaar) {
+      const alreadyByAadhaar = await Candidate.findOne({ election: electionId, aadhaar }).lean();
+      if (alreadyByAadhaar) throw { status: 409, message: 'An application with this Aadhaar already exists' };
+    }
+
+    const candidate = new Candidate({
+      election: election._id,
+      name: fullName,          // required by schema
+      fullName: fullName,
+      aadhaar: aadhaar || undefined,
+      address: address || '',
+      party: payload.party || '',
+      symbol: payload.symbol || '',
+      manifesto: payload.manifesto || '',
+      schemes: Array.isArray(payload.schemes) ? payload.schemes : (payload.schemes ? [payload.schemes] : []),
+      age: payload.age || null,
+      idProofProvided: !!payload.idProofProvided,
+      createdBy: actorId || null
+    });
+
+    // Save candidate and log
+    await candidate.save();
+    console.log('[DEBUG PARTICIPATE] candidate saved id=', candidate._id.toString());
+
+    // Sync into election.candidates if nested array exists
+    if (Array.isArray(election.candidates)) {
+      election.candidates.push({
+        _id: candidate._id,
+        name: candidate.name,
+        fullName: candidate.fullName || '',
+        address: candidate.address || '',
+        party: candidate.party || '',
+        schemes: candidate.schemes || [],
+        createdBy: candidate.createdBy,
+        createdAt: candidate.createdAt,
+        symbol: candidate.symbol || '',
+        manifesto: candidate.manifesto || ''
+      });
+      await election.save(); // IMPORTANT: await this
+      console.log('[DEBUG PARTICIPATE] election updated id=', election._id.toString());
+    }
+
+    return candidate;
+  }
+
+  // Transactional attempt then fallback
+  let session;
   try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      await session.endSession();
-      return res.status(400).json({ message: 'Invalid election id' });
-    }
+    session = await mongoose.startSession();
+    session.startTransaction();
 
-    if (!req.user) {
-      await session.endSession();
-      return res.status(401).json({ message: 'Authentication required' });
-    }
-
-    // Load election (we want a document so we can update)
-    const election = await Election.findById(id);
+    const election = await Election.findById(electionId).session(session);
     if (!election) {
-      await session.endSession();
+      await session.abortTransaction().catch(()=>{});
+      session.endSession();
       return res.status(404).json({ message: 'Election not found' });
     }
 
-    // Incoming payload
-    const {
-      eligibilityAnswers = {},
-      schemes: incomingSchemes = [],
-      name,
-      description,
-      party,
-      symbol,
-      manifesto = ''
-    } = req.body;
-
-    // Basic eligibility checks (customize to your needs)
-    const errors = [];
-    if (!eligibilityAnswers.verifiedId) errors.push('Proof of ID is required');
-    if (eligibilityAnswers.age && Number(eligibilityAnswers.age) < 25) errors.push('Minimum age is 25');
-
-    // Allowed voters check (if election restricts)
-    if (Array.isArray(election.allowedVoters) && election.allowedVoters.length) {
-      const uid = String(req.user._id);
-      const email = req.user.email ? String(req.user.email).toLowerCase() : null;
-      const allowed = election.allowedVoters.some(av => {
-        const s = String(av);
-        if (s === uid) return true;
-        if (email && String(s).toLowerCase() === email) return true;
-        return false;
-      });
-      if (!allowed) errors.push('You are not in the allowed voters list for this election');
+    // Transactional duplicate checks
+    if (actorId) {
+      const alreadyByUser = await Candidate.findOne({ election: electionId, createdBy: actorId }).session(session).lean();
+      if (alreadyByUser) {
+        await session.abortTransaction().catch(()=>{});
+        session.endSession();
+        return res.status(409).json({ message: 'You have already applied for this election' });
+      }
     }
-
-    if (errors.length) {
-      await session.endSession();
-      return res.status(400).json({ message: 'Not eligible', reasons: errors });
-    }
-
-    // Prevent duplicate registration by same user
-    const existing = await Candidate.findOne({ election: id, createdBy: req.user._id }).lean();
-    if (existing) {
-      await session.endSession();
-      return res.status(400).json({ message: 'You are already registered as a candidate for this election' });
-    }
-
-    // Normalize incoming selected schemes (strings)
-    const selectedSchemes = Array.isArray(incomingSchemes)
-      ? incomingSchemes.map(s => String(s).trim()).filter(Boolean)
-      : (incomingSchemes ? [String(incomingSchemes).trim()] : []);
-
-    // Build inferred schemes from manifesto text by matching against election.schemesList
-    // election.schemesList is expected: [{ code, title, description }]
-    const inferred = new Set();
-
-    if (manifesto && typeof manifesto === 'string' && Array.isArray(election.schemesList) && election.schemesList.length) {
-      const txt = manifesto.toLowerCase();
-      const tokens = new Set(
-        txt
-          .replace(/[^\w\s-]/g, ' ')
-          .split(/\s+/)
-          .map(t => t.trim())
-          .filter(Boolean)
-      );
-
-      const matchesManifesto = (field) => {
-        if (!field) return false;
-        const lower = String(field).toLowerCase();
-        if (txt.includes(lower)) return true;
-        for (const tok of tokens) {
-          if (tok.length > 2 && lower.includes(tok)) return true;
-        }
-        return false;
-      };
-
-      for (const s of election.schemesList) {
-        if (!s) continue;
-        if ((s.code && matchesManifesto(s.code)) || (s.title && matchesManifesto(s.title))) {
-          inferred.add(s.code || s.title);
-          continue;
-        }
-        const words = String(s.title || '').toLowerCase().split(/\s+/).filter(Boolean);
-        for (const w of words) {
-          if (tokens.has(w) && w.length > 2) {
-            inferred.add(s.code || s.title);
-            break;
-          }
-        }
+    if (aadhaar) {
+      const alreadyByAadhaar = await Candidate.findOne({ election: electionId, aadhaar }).session(session).lean();
+      if (alreadyByAadhaar) {
+        await session.abortTransaction().catch(()=>{});
+        session.endSession();
+        return res.status(409).json({ message: 'An application with this Aadhaar already exists' });
       }
     }
 
-    // Final schemes = selected ∪ inferred
-    const finalSchemes = Array.from(new Set([
-      ...selectedSchemes,
-      ...Array.from(inferred).map(s => String(s).trim()).filter(Boolean)
-    ]));
+    const candidateData = {
+      election: election._id,
+      name: fullName,
+      fullName: fullName,
+      aadhaar: aadhaar || undefined,
+      address: address || '',
+      party: payload.party || '',
+      symbol: payload.symbol || '',
+      manifesto: payload.manifesto || '',
+      schemes: Array.isArray(payload.schemes) ? payload.schemes : (payload.schemes ? [payload.schemes] : []),
+      age: payload.age || null,
+      idProofProvided: !!payload.idProofProvided,
+      createdBy: actorId || null
+    };
 
-    // Prepare candidate doc
-    const candidate = new Candidate({
-      election: id,
-      name: name || req.user.name || 'Unnamed Candidate',
-      description: description || manifesto || '',
-      party: party || '',
-      schemes: finalSchemes,
-      createdBy: req.user._id,
-      eligibilityData: eligibilityAnswers,
-      approved: true, // set to true here; change to false if admin approval required
-      symbol: symbol || '',
-      manifesto: manifesto || ''
-    });
+    const created = await Candidate.create([candidateData], { session });
+    const candidate = created[0];
 
-    // Save candidate + sync to Election.candidates inside a transaction
-    session.startTransaction();
-    try {
-      await candidate.save({ session });
-      await Election.updateOne(
-        { _id: id },
-        { $push: { candidates: {
-            _id: candidate._id,
-            name: candidate.name,
-            description: candidate.description,
-            party: candidate.party,
-            schemes: candidate.schemes,
-            createdBy: candidate.createdBy,
-            createdAt: candidate.createdAt,
-            symbol: candidate.symbol || '',
-            manifesto: candidate.manifesto || ''
-          } } },
-        { session }
-      );
-      await session.commitTransaction();
-      session.endSession();
-    } catch (err) {
-      await session.abortTransaction();
-      session.endSession();
-      throw err;
+    // push to nested array (if used)
+    election.candidates = Array.isArray(election.candidates) ? election.candidates.concat(candidate._id) : [candidate._id];
+    await election.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+    console.log('[DEBUG PARTICIPATE] transaction committed, candidate=', candidate._id.toString());
+
+    return res.status(201).json({ candidate });
+  } catch (err) {
+    const msg = (err && err.message) ? err.message : String(err);
+    console.warn('[PARTICIPATE] transactional path failed:', msg);
+
+    // cleanup session
+    try { if (session) { await session.abortTransaction().catch(()=>{}); session.endSession(); } } catch(e){}
+
+    // fallback to non-transactional if transactions not available
+    if (/Transaction numbers are only allowed on a replica set member|transactions are not supported/i.test(msg)) {
+      try {
+        const candidate = await doNonTransactional();
+        return res.status(201).json({ candidate });
+      } catch (fallbackErr) {
+        // Validation errors -> 400
+        if (fallbackErr && fallbackErr.name === 'ValidationError') {
+          const details = Object.values(fallbackErr.errors || {}).map(e => e.message);
+          return res.status(400).json({ message: 'Validation failed', details });
+        }
+        const status = fallbackErr?.status || 500;
+        console.error('[PARTICIPATE] fallback error', fallbackErr);
+        return res.status(status).json({ message: fallbackErr?.message || 'Server error' });
+      }
     }
 
-    return res.status(201).json(candidate);
-  } catch (err) {
-    console.error('participateAndRegister error', err);
-    try {
-      await session.endSession();
-    } catch (_) {}
-    return next(err);
+    // If validation error in transactional branch
+    if (err && err.name === 'ValidationError') {
+      const details = Object.values(err.errors || {}).map(e => e.message);
+      return res.status(400).json({ message: 'Validation failed', details });
+    }
+
+    // otherwise log & return
+    console.error('[PARTICIPATE] error', err && err.stack ? err.stack : err);
+    const status = err?.status || 500;
+    return res.status(status).json({ message: err?.message || 'Server error' });
   }
 }
 
-/**
- * Get results (aggregate vote counts by candidate)
- */
+
 export async function getResults(req, res, next) {
   try {
     const { id } = req.params;

@@ -1,20 +1,36 @@
 // client/src/api/adminApi.js
 import axios from "axios";
 
-const base = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+const BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
-// admin router is mounted at /api/admin (see server/src/routes/index.js)
+// Admin-specific axios instance: points to /api/admin
 const adminApi = axios.create({
-  baseURL: base + "/api/admin",
-  timeout: 10000,
+  baseURL: `${BASE}/api/admin`,   // <-- use the admin API root so calls use short subpaths
+  headers: {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  },
+  withCredentials: false,
 });
+
+console.log('adminApi.baseURL =', adminApi.defaults.baseURL);
+console.log('adminToken ->', localStorage.getItem('adminToken'), 'token ->', localStorage.getItem('token'));
 
 adminApi.interceptors.request.use((config) => {
-  const token = localStorage.getItem("adminToken");
-  if (token) {
-    config.headers = { ...(config.headers || {}), Authorization: `Bearer ${token}` };
-  }
+  const token = localStorage.getItem("adminToken") || localStorage.getItem("token");
+  if (token) config.headers["Authorization"] = `Bearer ${token}`;
   return config;
 });
+
+adminApi.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err?.response?.status === 401) {
+      localStorage.removeItem("adminToken");
+      window.dispatchEvent(new CustomEvent("admin-changed", { detail: null }));
+    }
+    return Promise.reject(err);
+  }
+);
 
 export default adminApi;

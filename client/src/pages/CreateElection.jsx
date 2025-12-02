@@ -3,6 +3,7 @@ import React, { useState, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 import { AuthContext } from '../context/AuthContext';
+import adminApi from '../api/adminApi';
 
 export default function CreateElection() {
   const nav = useNavigate();
@@ -18,39 +19,47 @@ export default function CreateElection() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
-  async function handleCreate(e) {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-    if (!user || user.role !== 'admin') {
-      setError('Only admins may create elections.');
-      setLoading(false);
-      return;
-    }
+    async function handleCreate(e) {
+  e.preventDefault();
+  setError(null);
+  setLoading(true);
 
-    try {
-      const payload = {
-        title,
-        description,
-        startAt: startAt ? new Date(startAt).toISOString() : null,
-        endAt: endAt ? new Date(endAt).toISOString() : null,
-        candidateEligibility,
-        eligibility: voterEligibility
-      };
-      const res = await api.post('/elections', payload);
-      setSuccess('Election created');
-      // navigate to new election detail if server returns id
-      const id = res?.data?.election?._id || res?.data?._id || res?.data?.id;
-      setTimeout(() => {
-        if (id) nav(`/elections/${id}`);
-        else nav('/elections');
-      }, 900);
-    } catch (err) {
-      setError(err?.response?.data?.message || err.message || 'Failed to create election');
-    } finally {
-      setLoading(false);
-    }
+  // Make admin decision robust: check AuthContext user OR localStorage adminToken
+  const isAdminFromUser = !!(user && String(user.role || '').toLowerCase() === 'admin');
+  const hasAdminToken = !!localStorage.getItem('adminToken') || !!localStorage.getItem('token');
+  const isAdmin = isAdminFromUser || hasAdminToken;
+
+  if (!isAdmin) {
+    setError('Only admins can create elections. Please login as admin.');
+    setLoading(false);
+    return;
   }
+
+  try {
+    const payload = {
+      title,
+      description,
+      startAt: startAt ? new Date(startAt).toISOString() : null,
+      endAt: endAt ? new Date(endAt).toISOString() : null,
+      candidateEligibility,
+      eligibility: voterEligibility
+    };
+    // const res = await api.post('/admin/elections', payload);
+    
+    const res = await adminApi.post('/elections',payload);
+    setSuccess('Election created');
+    const id = res?.data?.election?._id || res?.data?._id || res?.data?.id;
+    setTimeout(() => {
+      if (id) nav(`/elections/${id}`);
+      else nav('/elections');
+    }, 900);
+  } catch (err) {
+    setError(err?.response?.data?.message || err.message || 'Failed to create election');
+  } finally {
+    setLoading(false);
+  }
+}
+
 
   return (
     <div className="card" style={{ maxWidth: 800, margin: '20px auto' }}>

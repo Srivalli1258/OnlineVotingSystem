@@ -18,7 +18,9 @@ export default function ParticipateForm({
     eligibilityAnswers: {
       verifiedId: false,
       age: ''
-    }
+    },
+    aadhaar: '',
+    address: ''
   });
 
   // local input for adding a custom scheme
@@ -65,6 +67,12 @@ export default function ParticipateForm({
     if (!form.name || form.name.trim().length < 2) return 'Please enter your name';
     if (!form.eligibilityAnswers.verifiedId) return 'You must confirm you have a valid ID';
     if (!form.eligibilityAnswers.age || Number(form.eligibilityAnswers.age) < 18) return 'Valid age required (>=18)';
+
+    // If aadhaar provided, validate it is 12 digits
+    if (form.aadhaar && !/^\d{12}$/.test(String(form.aadhaar).trim())) {
+      return 'Aadhaar must be 12 digits';
+    }
+
     return null;
   }
 
@@ -85,12 +93,17 @@ export default function ParticipateForm({
         eligibilityAnswers: {
           verifiedId: form.eligibilityAnswers.verifiedId,
           age: Number(form.eligibilityAnswers.age)
-        }
+        },
+        // new fields
+        aadhaar: form.aadhaar ? String(form.aadhaar).trim() : undefined,
+        address: form.address ? String(form.address).trim() : ''
       };
 
       const res = await api.post(`/elections/${electionId}/candidates/participate`, payload);
-      // server returns created candidate document
-      const created = res.data;
+
+      // server often returns { candidate } — guard for both shapes
+      const created = (res?.data && (res.data.candidate || res.data)) || res.data;
+
       setSuccess('Application submitted successfully.');
       // small UX delay so user sees message
       setTimeout(() => {
@@ -99,7 +112,11 @@ export default function ParticipateForm({
 
     } catch (err) {
       console.error(err);
-      const msg = err?.response?.data?.message || (err?.response?.data?.reasons && err.response.data.reasons.join(', ')) || 'Failed to submit';
+      // prefer server message -> fallback to generic
+      const msg =
+        err?.response?.data?.message ||
+        (err?.response?.data?.details && err.response.data.details.join(', ')) ||
+        'Failed to submit';
       setError(msg);
     } finally {
       setLoading(false);
@@ -114,6 +131,16 @@ export default function ParticipateForm({
       <div style={{ display: 'grid', gap: 8 }}>
         <label style={{ fontSize: 13 }}>Full name</label>
         <input name="name" value={form.name} onChange={e => setField('name', e.target.value)} placeholder="Your full name" style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e6eefc' }} />
+      </div>
+
+      <div style={{ display: 'grid', gap: 8 }}>
+        <label style={{ fontSize: 13 }}>Aadhaar (optional)</label>
+        <input name="aadhaar" value={form.aadhaar} onChange={e => setField('aadhaar', e.target.value)} placeholder="12-digit Aadhaar" style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e6eefc' }} />
+      </div>
+
+      <div style={{ display: 'grid', gap: 8 }}>
+        <label style={{ fontSize: 13 }}>Address (optional)</label>
+        <textarea name="address" value={form.address} onChange={e => setField('address', e.target.value)} rows={3} placeholder="Your address" style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e6eefc' }} />
       </div>
 
       <div style={{ display: 'grid', gap: 8 }}>
