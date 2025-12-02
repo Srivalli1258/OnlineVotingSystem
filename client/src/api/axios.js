@@ -1,44 +1,50 @@
 // client/src/api/axios.js
 import axios from "axios";
 
-// MAIN USER API — voters & candidates
+// Correct backend base
+const BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+
+// Axios instance for ALL voter/candidate requests
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE || "http://localhost:5000/api",
-  headers: { "Content-Type": "application/json", Accept: "application/json" },
+  baseURL: `${BASE}/api`,   // <--- FIXED (adds /api automatically)
+  headers: {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  },
   withCredentials: false,
 });
 
-// ---- REQUEST INTERCEPTOR ----
-// Attach ONLY VOTER/CANDIDATE TOKEN
+// -------------------------------
+// REQUEST INTERCEPTOR
+// Add voter/candidate token ONLY
+// -------------------------------
 api.interceptors.request.use((config) => {
-  try {
-    const token = localStorage.getItem("token"); // voter/candidate token
-    if (token) {
-      config.headers["Authorization"] = `Bearer ${token}`;
-    }
-  } catch (err) {
-    console.error("Token attach error:", err);
+  const token = localStorage.getItem("token"); // voter/candidate token
+
+  if (token) {
+    config.headers["Authorization"] = `Bearer ${token}`;
   }
+
   return config;
 });
 
-// ---- RESPONSE INTERCEPTOR ----
-// Auto logout if token expired
+// -------------------------------
+// RESPONSE INTERCEPTOR
+// Auto-logout on 401
+// -------------------------------
 api.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    if (err?.response?.status === 401) {
-      // Invalid user session
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      // Clear local session
       localStorage.removeItem("token");
       localStorage.removeItem("user");
 
-      try {
-        window.dispatchEvent(new CustomEvent("user-changed", { detail: null }));
-      } catch (_) {}
-
-      // ❌ DO NOT AUTO REDIRECT — controlled by UI
+      // Notify listeners (Navbar update)
+      window.dispatchEvent(new CustomEvent("user-changed", { detail: null }));
     }
-    return Promise.reject(err);
+
+    return Promise.reject(error);
   }
 );
 
