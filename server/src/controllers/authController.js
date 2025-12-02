@@ -4,13 +4,14 @@ import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
 const SALT_ROUNDS = 10;
+const JWT_SECRET = process.env.JWT_SECRET || "devsecret";
+const JWT_EXPIRES = "7d";
 
-// ---------- Register ----------
+// ---------- Register (unchanged) ----------
 export async function register(req, res) {
   try {
     const { name, email, password, phone, dob, gender, address, idNumber } = req.body;
 
-    // mandatory checks
     if (!name || !email || !password || !phone || !dob || !gender || !address || !idNumber) {
       return res.status(400).json({ message: "All fields are required" });
     }
@@ -21,15 +22,15 @@ export async function register(req, res) {
 
     const normalizedEmail = String(email).trim().toLowerCase();
 
-    // check duplicate email
-    const existing = await User.findOne({ email: normalizedEmail });
+    const existing = await User.findOne({
+      $or: [{ email: normalizedEmail }, { idNumber }]
+    });
     if (existing) {
-      return res.status(400).json({ message: "Email already exists" });
+      return res.status(400).json({ message: "Email or Aadhaar already exists" });
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
-    // create user
     const createdUser = await User.create({
       name,
       email: normalizedEmail,
@@ -50,9 +51,9 @@ export async function register(req, res) {
     });
 
     const token = jwt.sign(
-      { userId: createdUser._id },
-      process.env.JWT_SECRET || "devsecret",
-      { expiresIn: "7d" }
+      { id: createdUser._id.toString(), role: createdUser.role || "voter" },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES }
     );
 
     const safeUser = {
@@ -75,32 +76,47 @@ export async function register(req, res) {
   }
 }
 
-// ---------- Login ----------
+// ---------- Login (robust & debug-friendly) ----------
 export async function login(req, res) {
   try {
-    const { aadhar, password, isAdmin } = req.body;
+    // Debug logging — remove after you confirm requests are correct
+    console.log("=== AUTH LOGIN ATTEMPT ===");
+    console.log("Content-Type:", req.headers["content-type"]);
+    console.log("Raw body:", req.body);
 
-    if (!password) return res.status(400).json({ message: "Password is required" });
+    // accept many possible field names from frontend
+    const body = req.body || {};
+    const aadhar = (body.aadhar || body.aadhaar || body.idNumber || body.id || body.aadhaarOrEmail || body.identifier || "").toString().trim();
+    const password = (body.password || "").toString();
 
-    let user;
+    // Validate
+    if (!aadhar || !password) {
+      // give a precise message — help the frontend
+      const missing = [];
+      if (!aadhar) missing.push("aadhar/idNumber");
+      if (!password) missing.push("password");
+      return res.status(400).json({ message: `Missing fields: ${missing.join(", ")}` });
+    }
 
-    if (isAdmin) {
-      // admin login: treat aadhar as email for admins
-      if (!aadhar) return res.status(400).json({ message: "Admin email is required" });
-      const email = String(aadhar).trim().toLowerCase();
-      user = await User.findOne({ email, role: "admin" });
-      if (!user) return res.status(400).json({ message: "Invalid admin credentials" });
-    } else {
-      // voter login: lookup by idNumber (Aadhaar)
-      if (!aadhar) return res.status(400).json({ message: "Aadhaar number is required" });
-      user = await User.findOne({ idNumber: aadhar });
-      if (!user) return res.status(400).json({ message: "Invalid Aadhaar or password" });
+    // Try to find user by idNumber (Aadhaar) first, then email
+    let user = null;
+    user = await User.findOne({ idNumber: aadhar });
+    if (!user) {
+      // try email
+      user = await User.findOne({ email: String(aadhar).toLowerCase() });
+    }
+
+    if (!user) {
+      return res.status(401).json({ message: " credentials" });
     }
 
     const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) return res.status(400).json({ message: "Invalid Aadhaar or password" });
+    if (!ok) {
+      console.log(password, user.passwordHash);
+      return res.status(401).json({ message: "invalid" });
+    }
 
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET || "devsecret", { expiresIn: "7d" });
+    const token = jwt.sign({ id: user._id.toString(), role: user.role || "voter" }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
 
     const safeUser = {
       _id: user._id,
@@ -110,9 +126,11 @@ export async function login(req, res) {
       role: user.role
     };
 
+    console.log("AUTH LOGIN SUCCESS:", user._id.toString());
     return res.json({ message: "Login successful", user: safeUser, token });
   } catch (err) {
     console.error("Login error:", err);
+    console.log("Occurs error");
     return res.status(500).json({ message: err?.message || "Server error" });
   }
 }

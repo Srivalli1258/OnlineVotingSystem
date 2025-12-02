@@ -14,29 +14,29 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// SECURITY MIDDLEWARE
+// --- SECURITY FIRST ---
 app.use(helmet());
-app.use(express.json());
-app.use(cookieParser());
 app.use(cors({ origin: "http://localhost:3000", credentials: true }));
 app.use(rateLimit({ windowMs: 60 * 1000, max: 100 }));
+app.use(cookieParser());
 
-// ROUTES
+// --- THEN BODY PARSERS (ONLY ONCE) ---
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// --- ROUTES ---
 app.use('/api', routes);
+
+// --- ERROR HANDLER ---
 app.use(errorHandler);
-// --- FIXED MONGO URI LOADING --- //
+
+// --- MONGO CONNECT ---
 let mongoURI = process.env.MONGO_URI;
-
-// FALLBACK (if env missing)
 if (!mongoURI) {
-  console.warn("⚠️ WARNING: MONGO_URI not found in .env — using fallback SRV URI.");
-
+  console.warn("⚠️ MONGO_URI not found — using fallback");
   mongoURI = "mongodb+srv://tontasrivalli_db_user:Srivalli%4027@cluster0.mbp4ect.mongodb.net/votingdb?retryWrites=true&w=majority";
 }
 
-// CONNECT → THEN START SERVER
 connectDB(mongoURI).then(() => {
-  app.listen(PORT, () =>
-    console.log(`🚀 Server running on port ${PORT}`)
-  );
+  app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 });

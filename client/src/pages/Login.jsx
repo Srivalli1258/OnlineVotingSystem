@@ -1,7 +1,7 @@
 // client/src/components/LoginPage.jsx
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import api from "../api/axios";
+import adminApi from "../api/adminApi"; // axios instance with base '/api/admin'
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -15,13 +15,10 @@ export default function LoginPage() {
   const [errorAdmin, setErrorAdmin] = useState("");
   const [errorVoter, setErrorVoter] = useState("");
 
-  // small helper to dispatch a cross-component event so Navbar can update immediately
-  function notifyUserChanged(user) {
-    try {
-      window.dispatchEvent(new CustomEvent("user-changed", { detail: user }));
-    } catch (e) {
-      // ignore if browser doesn't support CustomEvent (very rare)
-    }
+  // Small helper to show errors for a short time
+  function flashError(setter, msg, ms = 4000) {
+    setter(msg);
+    setTimeout(() => setter(""), ms);
   }
 
   async function handleAdminLogin(e) {
@@ -31,34 +28,35 @@ export default function LoginPage() {
     const employeeId = String(adminForm.employeeId || "").trim();
     const password = adminForm.password || "";
 
-    if (!employeeId) return setErrorAdmin("Employee Id is required");
-    if (!password) return setErrorAdmin("Password is required");
+    if (!employeeId) return flashError(setErrorAdmin, "Employee ID is required");
+    if (!password) return flashError(setErrorAdmin, "Password is required");
 
     setLoadingAdmin(true);
     try {
-      const res = await api.post("/auth/login", {
-        aadhar: employeeId,
-        password,
-        isAdmin: true
-      });
+      // adminApi should be an axios instance whose baseURL is "/api/admin"
+      const res = await adminApi.post("/login", { employeeId, password });
+      const { token, admin } = res.data || {};
 
-      const { token, user } = res.data || {};
-      if (!user || user.role !== "admin") {
-        setErrorAdmin("This account does not have admin access.");
-        setLoadingAdmin(false);
-        return;
+      if (!token || !admin) {
+        console.error("Admin login invalid response:", res.data);
+        return flashError(setErrorAdmin, "Invalid response from server");
       }
 
-      // persist token & user
-      if (token) localStorage.setItem("token", token);
-      if (user) localStorage.setItem("user", JSON.stringify(user));
+      // store token & admin for frontend use
+      localStorage.setItem("adminToken", token);
+      localStorage.setItem("admin", JSON.stringify(admin));
+      // notify other parts of app
+      window.dispatchEvent(new CustomEvent("admin-changed", { detail: admin }));
 
-      // notify other components
-      notifyUserChanged(user);
+      // go to admin dashboard
+      navigate("/");
 
-      navigate("/admin/dashboard");
     } catch (err) {
-      setErrorAdmin(err?.response?.data?.message || err?.message || "Login failed");
+      console.error("Admin login error:", err?.response || err);
+      const msg =
+        err?.response?.data?.message ||
+        (err?.message && /network/i.test(err.message) ? "Network error" : "Admin login failed");
+      flashError(setErrorAdmin, msg);
     } finally {
       setLoadingAdmin(false);
     }
@@ -71,124 +69,110 @@ export default function LoginPage() {
     const aadhar = String(voterForm.aadhar || "").trim();
     const password = voterForm.password || "";
 
-    if (!aadhar) return setErrorVoter("Aadhaar Number is required");
-    // basic Aadhaar validation: 12 digits
-    if (!/^\d{12}$/.test(aadhar)) return setErrorVoter("Aadhaar must be 12 digits");
-
-    if (!password) return setErrorVoter("Password is required");
+    if (!aadhar) return flashError(setErrorVoter, "Aadhaar Number is required");
+    if (!/^\d{12}$/.test(aadhar)) return flashError(setErrorVoter, "Aadhaar must be 12 digits");
+    if (!password) return flashError(setErrorVoter, "Password is required");
 
     setLoadingVoter(true);
     try {
-      const res = await api.post("/auth/login", {
-        aadhar,
-        password,
-        isAdmin: false
+      // Use full URL because your API may be running on a different port in dev
+      const base = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+      const res = await fetch(`${base}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aadhar, password }),
       });
 
-      const { token, user } = res.data || {};
-      if (!user || (user.role !== "voter" && user.role !== "candidate" && user.role !== "admin")) {
-        setErrorVoter("Account role not allowed here");
-        setLoadingVoter(false);
-        return;
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = text; }
+
+      if (!res.ok) {
+        console.error("Voter login response:", res.status, data);
+        return flashError(setErrorVoter, (data && data.message) || `Server returned ${res.status}`);
       }
 
-      if (token) localStorage.setItem("token", token);
-      if (user) localStorage.setItem("user", JSON.stringify(user));
+      const { token, user } = data || {};
+      if (!token || !user) {
+        console.error("Voter login invalid response:", data);
+        return flashError(setErrorVoter, "Invalid response from server");
+      }
 
-      // notify other components (Navbar)
-      notifyUserChanged(user);
+      localStorage.setItem("token", token);
+      localStorage.setItem("user", JSON.stringify(user));
+      window.dispatchEvent(new CustomEvent("user-changed", { detail: user }));
 
-      // redirect: admins to admin dashboard, others to home
-      if (user.role === "admin") navigate("/admin/dashboard");
+      // redirect based on role
+      if (user.role === "admin") navigate("/");
       else navigate("/");
     } catch (err) {
-      setErrorVoter(err?.response?.data?.message || err?.message || "Login failed");
+      console.error("Voter login fetch error:", err);
+      flashError(setErrorVoter, err?.message || "Login failed");
     } finally {
       setLoadingVoter(false);
     }
   }
 
   return (
-    <div className="lv-page login-page">
-      <header className="lv-header">
-        <div className="lv-header-inner">
-          <div className="lv-logo">
-            <img src="/assets/logo.png" alt="Logo" style={{ height: 44 }} onError={(e) => (e.target.style.display = "none")} />
-          </div>
-          <div className="lv-title">Your Vote. Your Voice.</div>
-        </div>
-      </header>
-
-      <main className="lv-main">
-        <div className="lv-content">
-          <div className="lv-card">
-            <div className="lv-cards-grid">
-              {/* Admin Login */}
-              <div className="lv-box">
-                <h4 className="lv-box-title">Admin Login</h4>
-                {errorAdmin && <div className="lv-alert">{errorAdmin}</div>}
-                <form onSubmit={handleAdminLogin} className="lv-form" noValidate>
-                  <label className="lv-label">Employee Id</label>
-                  <input
-                    className="lv-input"
-                    value={adminForm.employeeId}
-                    onChange={(e) => setAdminForm({ ...adminForm, employeeId: e.target.value })}
-                    placeholder="Enter Employee ID"
-                    autoComplete="username"
-                  />
-
-                  <label className="lv-label">Password</label>
-                  <input
-                    type="password"
-                    className="lv-input"
-                    value={adminForm.password}
-                    onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })}
-                    placeholder="Enter Admin Password"
-                    autoComplete="current-password"
-                  />
-
-                  <button type="submit" className="lv-submit" disabled={loadingAdmin}>
-                    {loadingAdmin ? "Signing..." : "Login"}
-                  </button>
-                </form>
-              </div>
-
-              {/* Voter Login */}
-              <div className="lv-box">
-                <h4 className="lv-box-title">Voter/Candidate Login</h4>
-                {errorVoter && <div className="lv-alert">{errorVoter}</div>}
-                <form onSubmit={handleVoterLogin} className="lv-form" noValidate>
-                  <label className="lv-label">Aadhaar Number</label>
-                  <input
-                    className="lv-input"
-                    value={voterForm.aadhar}
-                    onChange={(e) => setVoterForm({ ...voterForm, aadhar: e.target.value })}
-                    placeholder="Enter Aadhaar Number"
-                    inputMode="numeric"
-                    autoComplete="username"
-                  />
-
-                  <label className="lv-label">Password</label>
-                  <input
-                    type="password"
-                    className="lv-input"
-                    value={voterForm.password}
-                    onChange={(e) => setVoterForm({ ...voterForm, password: e.target.value })}
-                    placeholder="Enter Password"
-                    autoComplete="current-password"
-                  />
-
-                  <button type="submit" className="lv-submit" disabled={loadingVoter}>
-                    {loadingVoter ? "Signing..." : "Login"}
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
+    <div className="login-page" style={styles.page}>
+      <div style={styles.container}>
+        <div style={styles.card}>
+          <h3 style={styles.h3}>Admin Login</h3>
+          {errorAdmin && <div style={styles.error}>{errorAdmin}</div>}
+          <form onSubmit={handleAdminLogin}>
+            <input
+              style={styles.input}
+              value={adminForm.employeeId}
+              onChange={(e) => setAdminForm({ ...adminForm, employeeId: e.target.value })}
+              placeholder="Employee ID"
+            />
+            <input
+              style={styles.input}
+              type="password"
+              value={adminForm.password}
+              onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })}
+              placeholder="Password"
+            />
+            <button type="submit" style={{ ...styles.btn, opacity: loadingAdmin ? 0.7 : 1 }} disabled={loadingAdmin}>
+              {loadingAdmin ? "Signing..." : "Login"}
+            </button>
+          </form>
         </div>
 
-        <button className="lv-results" onClick={() => navigate("/results")}>Results</button>
-      </main>
+        <div style={styles.card}>
+          <h3 style={styles.h3}>Voter / Candidate Login</h3>
+          {errorVoter && <div style={styles.error}>{errorVoter}</div>}
+          <form onSubmit={handleVoterLogin}>
+            <input
+              style={styles.input}
+              value={voterForm.aadhar}
+              onChange={(e) => setVoterForm({ ...voterForm, aadhar: e.target.value })}
+              placeholder="Aadhaar (12 digits)"
+            />
+            <input
+              style={styles.input}
+              type="password"
+              value={voterForm.password}
+              onChange={(e) => setVoterForm({ ...voterForm, password: e.target.value })}
+              placeholder="Password"
+            />
+            <button type="submit" style={{ ...styles.btn, opacity: loadingVoter ? 0.7 : 1 }} disabled={loadingVoter}>
+              {loadingVoter ? "Signing..." : "Login"}
+            </button>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }
+
+/* Inline styles to match the screenshot layout — replace with your CSS/Tailwind if you prefer */
+const styles = {
+  page: { minHeight: "100vh", background: "linear-gradient(180deg,#f6f9ff,#f3f7fb)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 },
+  container: { width: "100%", maxWidth: 1000, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 },
+  card: { background: "#fff", borderRadius: 12, padding: 22, boxShadow: "0 6px 20px rgba(7,22,63,0.08)" },
+  h3: { margin: 0, marginBottom: 12, color: "#0f4bd8" },
+  input: { width: "100%", padding: "10px 12px", borderRadius: 6, border: "1px solid #e6e9ef", marginBottom: 12, fontSize: 14 },
+  btn: { padding: "10px 18px", borderRadius: 8, border: "0", background: "linear-gradient(90deg,#0f4bd8,#0b3aa8)", color: "#fff", fontWeight: 600, cursor: "pointer" },
+  error: { background: "#fff5f5", color: "#b00020", padding: "8px 10px", borderRadius: 6, marginBottom: 10, border: "1px solid #ffd6d6" },
+};

@@ -3,7 +3,7 @@ import React, { useEffect, useState, useContext, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 import { AuthContext } from '../context/AuthContext';
-import ParticipateForm from '../components/ParticipateForm';
+import ParticipateForm from '../components/ParticipateForm.jsx';
 import CandidateVoteModal from '../components/CandidateVoteModal';
 
 const IMAGE_SRC = '/mnt/data/Screenshot 2025-11-25 153320.png';
@@ -209,8 +209,20 @@ export default function ElectionDetail() {
               <div>
                 {isCandidate && <span className="note" style={{ fontWeight:700 }}>You are a candidate</span>}
                 {isAdmin && <button className="btn secondary" onClick={() => nav('/elections/create')} style={{ marginLeft: 12 }}>Manage Elections</button>}
-                {!isAdmin && !isCandidate && user && (role === 'candidate' || role === 'user') && (
-                  <button className="btn" onClick={() => setShowParticipateInline(prev => !prev)} style={{ marginLeft: 12 }}>
+                {/* Show Participate button for authenticated, non-admin users who are not already candidates */}
+                {!isAdmin && !isCandidate && user && (
+                  <button className="btn" onClick={() => {
+                    // show form and scroll into view
+                    setShowParticipateInline(prev => !prev);
+                    // clear messages
+                    setMessage(null);
+                    setError(null);
+                    // small delay then scroll
+                    setTimeout(() => {
+                      const el = document.querySelector('.participate-form-anchor');
+                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }, 80);
+                  }} style={{ marginLeft: 12 }}>
                     {showParticipateInline ? 'Hide form' : 'Participate as candidate'}
                   </button>
                 )}
@@ -218,44 +230,49 @@ export default function ElectionDetail() {
               </div>
             </div>
 
+            {/* Inline Participate Form */}
             {showParticipateInline && (
-              <div style={{ marginTop: 12 }}>
+              <div className="participate-form-anchor" style={{ marginTop: 12 }}>
                 <ParticipateForm
                   electionId={id}
                   electionSchemes={election.schemesList || []}
                   user={user}
                   onRegistered={(cand) => handleRegisteredCandidate(cand)}
+                  onClose={() => setShowParticipateInline(false)}
                 />
               </div>
             )}
 
-            <div style={{ marginTop: 12 }}>
-              {candidates.length === 0 && <div className="note">No candidates yet.</div>}
-              {candidates.map(c => (
-                <div key={c._id || c.id} className="candidate-card" style={{ border:'1px solid #f1f5f9', padding:12, borderRadius:8, marginBottom:12 }}>
-                  <div style={{ display:'flex', gap:12, alignItems:'flex-start' }}>
-                    <div style={{ width:88 }}>
-                      {c.symbol ? <img src={c.symbol} alt={c.name} style={{ width:88, height:88, objectFit:'cover', borderRadius:6 }} /> : <div style={{ width:88, height:88, background:'#f8fafc', borderRadius:6 }} />}
-                    </div>
-                    <div style={{ flex:1 }}>
-                      <div style={{ display:'flex', justifyContent:'space-between' }}>
-                        <div>
-                          <div style={{ fontSize:18, fontWeight:600 }}>{c.name}</div>
-                          <div className="note">{c.party || ''}</div>
-                        </div>
+            {/* Candidate list is hidden while the participate form is shown */}
+            {!showParticipateInline && (
+              <div style={{ marginTop: 12 }}>
+                {candidates.length === 0 && <div className="note">No candidates yet.</div>}
+                {candidates.map(c => (
+                  <div key={c._id || c.id} className="candidate-card" style={{ border:'1px solid #f1f5f9', padding:12, borderRadius:8, marginBottom:12 }}>
+                    <div style={{ display:'flex', gap:12, alignItems:'flex-start' }}>
+                      <div style={{ width:88 }}>
+                        {c.symbol ? <img src={c.symbol} alt={c.name} style={{ width:88, height:88, objectFit:'cover', borderRadius:6 }} /> : <div style={{ width:88, height:88, background:'#f8fafc', borderRadius:6 }} />}
                       </div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ display:'flex', justifyContent:'space-between' }}>
+                          <div>
+                            <div style={{ fontSize:18, fontWeight:600 }}>{c.name}</div>
+                            <div className="note">{c.party || ''}</div>
+                          </div>
+                        </div>
 
-                      {c.manifesto && <div style={{ marginTop:8 }}><strong>Manifesto:</strong> {c.manifesto}</div>}
-                      {c.schemes && c.schemes.length > 0 && <div style={{ marginTop:8 }}><strong>Schemes:</strong> {c.schemes.join(', ')}</div>}
+                        {c.manifesto && <div style={{ marginTop:8 }}><strong>Manifesto:</strong> {c.manifesto}</div>}
+                        {c.schemes && c.schemes.length > 0 && <div style={{ marginTop:8 }}><strong>Schemes:</strong> {c.schemes.join(', ')}</div>}
 
-                      <div style={{ marginTop:10, display:'flex', gap:8 }}>
-                        <button className="btn secondary" onClick={() => setTab('Schemes')}>View schemes</button>
+                        <div style={{ marginTop:10, display:'flex', gap:8 }}>
+                          <button className="btn secondary" onClick={() => setTab('Schemes')}>View schemes</button>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -293,7 +310,6 @@ export default function ElectionDetail() {
           <div className="card">
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
               <h3 style={{ marginTop: 0 }}>Cast your vote</h3>
-              {/* Vote (List) modal button remains available */}
               {user && (role === 'voter' || role === 'candidate') && (
                 <button className="btn" onClick={() => setVoteModalOpen(true)}>Vote (List)</button>
               )}
@@ -305,7 +321,6 @@ export default function ElectionDetail() {
 
             {candidates.length === 0 && <div className="note">No candidates available to vote for.</div>}
 
-            {/* Candidate list (no per-item vote controls) */}
             {candidates.map(c => (
               <div key={c._id || c.id} style={{ border:'1px solid #eef2ff', padding:12, borderRadius:8, marginBottom:10, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <div>

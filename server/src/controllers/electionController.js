@@ -4,13 +4,14 @@ import Candidate from '../models/Candidate.js';
 import Vote from '../models/Vote.js';
 import mongoose from 'mongoose';
 
-
+/**
+ * Create election (admin)
+ */
 export async function createElection(req, res) {
   try {
     const { title, description, startAt, endAt, isPublic, allowedVoters, candidateEligibility, eligibility } = req.body;
 
     if (!req.user) return res.status(401).json({ message: 'Authentication required' });
-    // Only admin allowed (adjust per your auth)
     if (String(req.user.role).toLowerCase() !== 'admin') {
       return res.status(403).json({ message: 'Only admins can create elections' });
     }
@@ -55,8 +56,6 @@ export async function listElections(req, res, next) {
 
 /**
  * Get single election (returns normalized payload expected by frontend)
- * - Public: will not throw when req.user is missing
- * - Normalized response: { election, candidates, canVote, hasVoted, votedFor, isCandidate }
  */
 export async function getElection(req, res, next) {
   try {
@@ -73,9 +72,6 @@ export async function getElection(req, res, next) {
     try {
       candidates = await Candidate.find({ election: election._id }).sort({ createdAt: 1 }).lean();
     } catch (candErr) {
-      // if Candidate collection lookup fails, fall back to nested election.candidates
-      // do not throw — we want the endpoint to remain available
-      // eslint-disable-next-line no-console
       console.warn('Candidate lookup failed — falling back to nested candidates if any', candErr);
       candidates = [];
     }
@@ -105,7 +101,6 @@ export async function getElection(req, res, next) {
     // Allowed voters check (if set) — default to true when allowedVoters not provided
     let allowed = true;
     if (Array.isArray(election.allowedVoters) && election.allowedVoters.length) {
-      // If requester is authenticated, try to match by user id first, then by email
       if (req.user) {
         const uid = String(req.user._id);
         const email = req.user.email ? String(req.user.email).toLowerCase() : null;
@@ -116,7 +111,6 @@ export async function getElection(req, res, next) {
           return false;
         });
       } else {
-        // not authenticated, cannot verify membership => not allowed
         allowed = false;
       }
     }
@@ -133,12 +127,9 @@ export async function getElection(req, res, next) {
           canVote = false; // once voted, can't vote again
         }
       } catch (voteErr) {
-        // don't break the endpoint — just log
-        // eslint-disable-next-line no-console
         console.warn('Vote lookup failed', voteErr);
       }
     } else {
-      // not logged in or role not allowed -> cannot vote
       canVote = false;
     }
 
@@ -146,16 +137,13 @@ export async function getElection(req, res, next) {
     let isCandidate = false;
     if (req.user) {
       try {
-        // check Candidate collection first
         if (Array.isArray(candidates) && candidates.length) {
           isCandidate = candidates.some(c => String(c.createdBy) === String(req.user._id));
         }
-        // fallback: check nested election.candidates (if present)
         if (!isCandidate && Array.isArray(election.candidates) && election.candidates.length) {
           isCandidate = election.candidates.some(c => String(c.createdBy) === String(req.user._id) || String(c._id) === String(req.user.candidateId));
         }
       } catch (candCheckErr) {
-        // eslint-disable-next-line no-console
         console.warn('isCandidate check failed', candCheckErr);
         isCandidate = false;
       }
@@ -170,12 +158,10 @@ export async function getElection(req, res, next) {
 /**
  * Add a candidate to an election.
  * - Admins can add arbitrary candidates
- * - Users with role 'candidate' can register themselves (only once)
+ * - Users can register themselves (only once)
+ *
+ * POST /api/elections/:id/candidates
  */
-
-// POST /api/elections/:id/candidates
-// server/src/controllers/electionController.js
-
 export async function addCandidate(req, res, next) {
   try {
     const { id } = req.params;
@@ -184,12 +170,10 @@ export async function addCandidate(req, res, next) {
     const election = await Election.findById(id);
     if (!election) return res.status(404).json({ message: 'Election not found' });
 
-    // Basic eligibility check example — admin sets election.candidateEligibility string
-    // You can parse rules more thoroughly
     const { name, age, manifesto, schemes } = req.body;
     if (!name || name.trim().length === 0) return res.status(400).json({ message: 'Name required' });
 
-    // Example eligibility: if election.candidateEligibility contains "minAge:18"
+    // If election has a candidateEligibility string like "minAge:18" parse it
     if (election.candidateEligibility) {
       const m = election.candidateEligibility.match(/minAge:(\d+)/);
       if (m && Number(m[1]) > 0) {
@@ -200,39 +184,99 @@ export async function addCandidate(req, res, next) {
       }
     }
 
-    // Add candidate to nested array
-    const cand = {
+    // allow admin to add arbitrary candidate (no createdBy check)
+    if (req.user && String(req.user.role).toLowerCase() === 'admin') {
+      const adminCand = {
+        name: name.trim(),
+        description: manifesto || '',
+        manifesto: manifesto || '',
+        schemes: Array.isArray(schemes) ? schemes : (schemes ? [schemes] : []),
+        createdBy: req.user._id
+      };
+      election.candidates.push(adminCand);
+      await election.save();
+      const added = election.candidates[election.candidates.length - 1];
+      return res.status(201).json({ message: 'Candidate added by admin', candidate: added, eligible: true });
+    }
+
+    // For normal users: ensure authentication and prevent duplicates
+    if (!req.user) return res.status(401).json({ message: 'Authentication required' });
+
+    const already = await Candidate.findOne({ election: id, createdBy: req.user._id }).lean();
+    if (already) return res.status(409).json({ message: 'You have already applied for this election' });
+
+    // Create candidate document in Candidate collection and also sync to election's nested array
+    const candidateDoc = new Candidate({
+      election: id,
       name: name.trim(),
       description: manifesto || '',
-      manifesto: manifesto || '',
+      party: req.body.party || '',
       schemes: Array.isArray(schemes) ? schemes : (schemes ? [schemes] : []),
-      createdBy: req.user?._id
-    };
+      createdBy: req.user._id,
+      eligibilityData: { age: age || null },
+      approved: false,
+      manifesto: manifesto || ''
+    });
 
-    election.candidates.push(cand);
-    await election.save();
+    // Save candidate and update election in a transaction (best-effort)
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      await candidateDoc.save({ session });
+      await Election.updateOne(
+        { _id: id },
+        { $push: { candidates: {
+            _id: candidateDoc._id,
+            name: candidateDoc.name,
+            description: candidateDoc.description,
+            party: candidateDoc.party,
+            schemes: candidateDoc.schemes,
+            createdBy: candidateDoc.createdBy,
+            createdAt: candidateDoc.createdAt,
+            symbol: candidateDoc.symbol || '',
+            manifesto: candidateDoc.manifesto || ''
+          } } },
+        { session }
+      );
+      await session.commitTransaction();
+      session.endSession();
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      throw err;
+    }
 
-    // return last inserted candidate (Mongoose gives _id)
-    const added = election.candidates[election.candidates.length - 1];
-
-    return res.status(201).json({ message: 'Candidate registered', candidate: added, eligible: true });
+    return res.status(201).json({ message: 'Candidate registered (pending approval)', candidate: candidateDoc, eligible: true });
   } catch (err) {
     console.error('addCandidate error', err);
     return next(err);
   }
 }
 
-
-// Participate + infer schemes from manifesto
+/**
+ * Participate + infer schemes from manifesto and register
+ * POST /api/elections/:id/participate
+ */
 export async function participateAndRegister(req, res, next) {
+  const session = await mongoose.startSession();
   try {
     const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'Invalid election id' });
+    if (!mongoose.isValidObjectId(id)) {
+      await session.endSession();
+      return res.status(400).json({ message: 'Invalid election id' });
+    }
 
-    if (!req.user) return res.status(401).json({ message: 'Authentication required' });
+    if (!req.user) {
+      await session.endSession();
+      return res.status(401).json({ message: 'Authentication required' });
+    }
 
-    const election = await Election.findById(id).lean();
-    if (!election) return res.status(404).json({ message: 'Election not found' });
+    // Load election (we want a document so we can update)
+    const election = await Election.findById(id);
+    if (!election) {
+      await session.endSession();
+      return res.status(404).json({ message: 'Election not found' });
+    }
 
     // Incoming payload
     const {
@@ -245,11 +289,12 @@ export async function participateAndRegister(req, res, next) {
       manifesto = ''
     } = req.body;
 
-    // Basic eligibility checks (customize as needed)
+    // Basic eligibility checks (customize to your needs)
     const errors = [];
     if (!eligibilityAnswers.verifiedId) errors.push('Proof of ID is required');
     if (eligibilityAnswers.age && Number(eligibilityAnswers.age) < 25) errors.push('Minimum age is 25');
 
+    // Allowed voters check (if election restricts)
     if (Array.isArray(election.allowedVoters) && election.allowedVoters.length) {
       const uid = String(req.user._id);
       const email = req.user.email ? String(req.user.email).toLowerCase() : null;
@@ -262,11 +307,17 @@ export async function participateAndRegister(req, res, next) {
       if (!allowed) errors.push('You are not in the allowed voters list for this election');
     }
 
-    if (errors.length) return res.status(400).json({ message: 'Not eligible', reasons: errors });
+    if (errors.length) {
+      await session.endSession();
+      return res.status(400).json({ message: 'Not eligible', reasons: errors });
+    }
 
     // Prevent duplicate registration by same user
     const existing = await Candidate.findOne({ election: id, createdBy: req.user._id }).lean();
-    if (existing) return res.status(400).json({ message: 'You are already registered as a candidate for this election' });
+    if (existing) {
+      await session.endSession();
+      return res.status(400).json({ message: 'You are already registered as a candidate for this election' });
+    }
 
     // Normalize incoming selected schemes (strings)
     const selectedSchemes = Array.isArray(incomingSchemes)
@@ -279,22 +330,18 @@ export async function participateAndRegister(req, res, next) {
 
     if (manifesto && typeof manifesto === 'string' && Array.isArray(election.schemesList) && election.schemesList.length) {
       const txt = manifesto.toLowerCase();
-      // token set from manifesto (words & multi-word phrases)
       const tokens = new Set(
         txt
-          .replace(/[^\w\s-]/g, ' ') // remove punctuation
+          .replace(/[^\w\s-]/g, ' ')
           .split(/\s+/)
           .map(t => t.trim())
           .filter(Boolean)
       );
 
-      // helper to test matches
       const matchesManifesto = (field) => {
         if (!field) return false;
         const lower = String(field).toLowerCase();
-        // direct substring match (allows multi-word)
         if (txt.includes(lower)) return true;
-        // or any token match
         for (const tok of tokens) {
           if (tok.length > 2 && lower.includes(tok)) return true;
         }
@@ -302,17 +349,16 @@ export async function participateAndRegister(req, res, next) {
       };
 
       for (const s of election.schemesList) {
-        // if codes or titles match manifesto, infer the scheme code/title
-        if (s.code && matchesManifesto(s.code)) inferred.add(s.code);
-        else if (s.title && matchesManifesto(s.title)) inferred.add(s.code || s.title);
-        else {
-          // also check words inside title
-          const words = String(s.title || '').toLowerCase().split(/\s+/).filter(Boolean);
-          for (const w of words) {
-            if (tokens.has(w) && w.length > 2) {
-              inferred.add(s.code || s.title);
-              break;
-            }
+        if (!s) continue;
+        if ((s.code && matchesManifesto(s.code)) || (s.title && matchesManifesto(s.title))) {
+          inferred.add(s.code || s.title);
+          continue;
+        }
+        const words = String(s.title || '').toLowerCase().split(/\s+/).filter(Boolean);
+        for (const w of words) {
+          if (tokens.has(w) && w.length > 2) {
+            inferred.add(s.code || s.title);
+            break;
           }
         }
       }
@@ -333,46 +379,61 @@ export async function participateAndRegister(req, res, next) {
       schemes: finalSchemes,
       createdBy: req.user._id,
       eligibilityData: eligibilityAnswers,
-      approved: true,
+      approved: true, // set to true here; change to false if admin approval required
       symbol: symbol || '',
       manifesto: manifesto || ''
     });
 
-    await candidate.save();
-
-    // Sync minimal data into election.candidates array (use update to avoid race)
-    await Election.updateOne(
-      { _id: id },
-      { $push: { candidates: {
-          _id: candidate._id,
-          name: candidate.name,
-          description: candidate.description,
-          party: candidate.party,
-          schemes: candidate.schemes,
-          createdBy: candidate.createdBy,
-          createdAt: candidate.createdAt,
-          symbol: candidate.symbol || '',
-          manifesto: candidate.manifesto || ''
-        } } }
-    );
+    // Save candidate + sync to Election.candidates inside a transaction
+    session.startTransaction();
+    try {
+      await candidate.save({ session });
+      await Election.updateOne(
+        { _id: id },
+        { $push: { candidates: {
+            _id: candidate._id,
+            name: candidate.name,
+            description: candidate.description,
+            party: candidate.party,
+            schemes: candidate.schemes,
+            createdBy: candidate.createdBy,
+            createdAt: candidate.createdAt,
+            symbol: candidate.symbol || '',
+            manifesto: candidate.manifesto || ''
+          } } },
+        { session }
+      );
+      await session.commitTransaction();
+      session.endSession();
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      throw err;
+    }
 
     return res.status(201).json(candidate);
   } catch (err) {
-    next(err);
+    console.error('participateAndRegister error', err);
+    try {
+      await session.endSession();
+    } catch (_) {}
+    return next(err);
   }
 }
+
+/**
+ * Get results (aggregate vote counts by candidate)
+ */
 export async function getResults(req, res, next) {
   try {
     const { id } = req.params;
     if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'Invalid election id' });
 
-    // aggregate votes by candidate
     const agg = await Vote.aggregate([
       { $match: { election: mongoose.Types.ObjectId(id) } },
       { $group: { _id: '$candidate', count: { $sum: 1 } } },
     ]);
 
-    // Convert to candidateId->count mapping or array
     const results = (agg || []).map(r => ({ candidateId: String(r._id), count: r.count }));
 
     return res.json({ results });
@@ -387,5 +448,6 @@ export default {
   getElection,
   createElection,
   addCandidate,
+  participateAndRegister,
   getResults
 };

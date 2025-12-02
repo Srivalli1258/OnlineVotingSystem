@@ -1,147 +1,70 @@
 // client/src/components/Navbar.jsx
-import React, { useEffect, useState, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React from "react";
+import { Link } from "react-router-dom";
+import useAuth from "../hooks/useAuth";
 
-/**
- * Navbar component (interactive)
- * - Reads `localStorage.user` for login state
- * - Updates on `storage` events (other tabs) and `user-changed` event (same tab)
- * - Shows avatar + dropdown when logged in
- * - Uses CSS classes from your stylesheet
- */
 export default function Navbar() {
-  const navigate = useNavigate();
-  const [user, setUser] = useState(null);        // { name, email, ... } or null
-  const [open, setOpen] = useState(false);
-  const dropdownRef = useRef(null);
+  const { admin, isAdmin, user, isUser, logoutAdmin, logoutUser } = useAuth();
 
-  // Load user from localStorage on mount and listen for storage events (other tabs)
-  useEffect(() => {
-    const raw = localStorage.getItem("user");
-    if (raw) {
-      try { setUser(JSON.parse(raw)); }
-      catch { setUser(null); }
-    } else {
-      setUser(null);
-    }
+  // choose which profile to show (admin preferred)
+  const profile = isAdmin ? admin : isUser ? user : null;
 
-    function onStorage(e) {
-      if (e.key === "user") {
-        const newRaw = localStorage.getItem("user");
-        if (newRaw) setUser(JSON.parse(newRaw));
-        else setUser(null);
-      }
-    }
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
-
-  // Listen for login changes triggered inside LoginPage.jsx (same tab)
-  useEffect(() => {
-    function onUserChanged(e) {
-      const u = e?.detail ?? null;
-      if (u) setUser(u);
-      else {
-        const raw = localStorage.getItem("user");
-        setUser(raw ? JSON.parse(raw) : null);
-      }
-    }
-    window.addEventListener("user-changed", onUserChanged);
-    return () => window.removeEventListener("user-changed", onUserChanged);
-  }, []);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    function onDoc(e) {
-      if (!dropdownRef.current) return;
-      if (!dropdownRef.current.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener("pointerdown", onDoc);
-    return () => document.removeEventListener("pointerdown", onDoc);
-  }, []);
-
-  function initials(name) {
-    if (!name) return "U";
-    const parts = name.trim().split(/\s+/).filter(Boolean);
-    if (parts.length === 0) return "U";
-    if (parts.length === 1) return parts[0].slice(0, 1).toUpperCase();
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  }
-
-  function signOut() {
-    // optional: call backend logout endpoint here if you have one
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    // notify other components (in case someone listens)
-    try { window.dispatchEvent(new CustomEvent("user-changed", { detail: null })); } catch {}
-    setUser(null);
-    setOpen(false);
-    navigate("/login");
+  function getInitials(p) {
+    if (!p) return "";
+    // admin: show last 3 of employeeId or full if short
+    if (p.employeeId) return p.employeeId.slice(-3).toUpperCase();
+    // user: show initials from name
+    if (p.name) return p.name.split(" ").map(s => s[0]).slice(0,2).join("").toUpperCase();
+    return "";
   }
 
   return (
-    <nav className="app-nav" role="navigation" aria-label="Main navigation">
-      <div className="nav-inner">
-        <div className="brand">
-          <div className="logo-crop">
-            <img
-              src="https://t4.ftcdn.net/jpg/01/57/93/42/240_F_1579342417_JN4bqU0sHk0cslwZncXcOGQnVfdE9xuJ.jpg"
-              alt="VoteX logo"
-              className="brand-logo"
-            />
-          </div>
-          <div className="brand-text">
-            <div className="brand-title">VoteX</div>
-            <div className="brand-subtitle">Online Voting System</div>
-          </div>
+    <header className="nav" style={{ background: "linear-gradient(90deg,#0f4bd8,#0b3aa8)", color: "#fff", padding: "12px 24px" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+          <Link to="/" style={{ color: "#fff", textDecoration: "none", display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 8, background: "#071A3F", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700 }}>V</div>
+            <div style={{ fontWeight: 700 }}>VoteX</div>
+          </Link>
+
+          <nav style={{ display: "flex", gap: 16, marginLeft: 20 }}>
+            <Link to="/" style={{ color: "#fff", textDecoration: "none" }}>Home</Link>
+            <Link to="/about" style={{ color: "#fff", textDecoration: "none" }}>About</Link>
+            <Link to={isAdmin ? "/admin/elections" : "/elections"} style={{ color: "#fff", textDecoration: "none" }}>Elections</Link>
+            <Link to="/contact" style={{ color: "#fff", textDecoration: "none" }}>Contact</Link>
+          </nav>
         </div>
 
-        <div className="nav-center">
-          <Link to="/">Home</Link>
-          <Link to="/about">About</Link>
-          <Link to="/elections">Elections</Link>
-          <Link to="/contact">Contact</Link>
-        </div>
-
-        <div className="nav-auth" ref={dropdownRef} style={{ position: "relative" }}>
-          {!user ? (
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          {!profile ? (
             <>
-              <Link to="/login" className="btn nav-login">Login</Link>
-              <Link to="/register" className="btn nav-register">Register</Link>
+              <Link to="/login" style={{ color: "#fff", border: "1px solid rgba(255,255,255,0.18)", padding: "8px 12px", borderRadius: 20 }}>Login</Link>
+              <Link to="/register" style={{ background: "#fff", color: "#0f4bd8", padding: "8px 12px", borderRadius: 20, textDecoration: "none" }}>Register</Link>
             </>
           ) : (
-            <div className="nav-profile">
-              <button
-                aria-haspopup="true"
-                aria-expanded={open}
-                className="profile-btn"
-                onClick={() => setOpen((s) => !s)}
-                title={user.name || "Profile"}
-              >
-                <span className="avatar">{initials(user.name)}</span>
-              </button>
-
-              {open && (
-                <div className="profile-dropdown" role="menu" aria-label="Profile menu">
-                  <div className="profile-info" role="presentation">
-                    <div className="profile-name">{user.name}</div>
-                    <div className="profile-email">{user.email}</div>
-                  </div>
-
-                  <div className="profile-actions" role="menuitem">
-                    <Link className="profile-action" to="/profile" onClick={() => setOpen(false)}>
-                      View Profile
-                    </Link>
-                    <button className="profile-action signout" onClick={signOut}>
-                      Sign out
-                    </button>
-                  </div>
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: "50%", background: "#fff",
+                  color: "#0f4bd8", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700
+                }}>
+                  {getInitials(profile)}
                 </div>
-              )}
-            </div>
+                <div style={{ color: "#fff", fontWeight: 600 }}>
+                  {profile.name || profile.employeeId || (profile.email || "").split("@")[0]}
+                </div>
+                <button
+                  onClick={() => { isAdmin ? logoutAdmin() : logoutUser(); }}
+                  style={{ background: "transparent", color: "#fff", border: "1px solid rgba(255,255,255,0.18)", padding: "6px 10px", borderRadius: 8 }}
+                >
+                  Logout
+                </button>
+              </div>
+            </>
           )}
         </div>
       </div>
-    </nav>
+    </header>
   );
 }
+  
