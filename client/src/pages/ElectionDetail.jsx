@@ -344,7 +344,7 @@ export default function ElectionDetail() {
           </div>
         )}
 
-        {/* View Votes (admin) */}
+  {/* View Votes (admin) */}
 {tab === "View Votes" && isAdmin && (
   <div className="card">
     <h3 style={{ marginTop: 0 }}>Votes (Admin View)</h3>
@@ -359,23 +359,29 @@ export default function ElectionDetail() {
       <table className="results-table" style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            <th style={{ padding: "8px 6px" }}>Voter ID</th>
-            <th style={{ padding: "8px 6px" }}>Voted At</th>
+            <th style={{ padding: "8px 6px", textAlign: "left" }}>Voter ID</th>
+            <th style={{ padding: "8px 6px", textAlign: "left" }}>Voted At</th>
           </tr>
         </thead>
         <tbody>
           {results.map((v, i) => {
+            // Prefer explicit voterCode (string), otherwise fallbacks:
+            // - plain string voterId
+            // - populated/voter object: voterId._id or voterId.id
             const voterIdStr =
-              typeof v.voterId === "string"
-                ? v.voterId
-                : v.voterId?._id ?? v.voterId?.id ?? "N/A";
+              // common explicit field (we used this name when writing votes in server)
+              (v.voterCode && String(v.voterCode).trim()) ||
+              // older attempts used voterId as a string
+              (typeof v.voterId === "string" && v.voterId) ||
+              // populated object shape
+              (v.voterId && typeof v.voterId === "object" && (v.voterId.voterId || v.voterId._id || v.voterId.id)) ||
+              // final fallback
+              "N/A";
 
             return (
               <tr key={v._id || `${voterIdStr}-${i}`} style={{ borderTop: "1px solid #f1f5f9" }}>
                 <td style={{ padding: "8px 6px" }}>{voterIdStr}</td>
-                <td style={{ padding: "8px 6px" }}>
-                  {v.createdAt ? new Date(v.createdAt).toLocaleString() : "N/A"}
-                </td>
+                <td style={{ padding: "8px 6px" }}>{v.createdAt ? new Date(v.createdAt).toLocaleString() : "N/A"}</td>
               </tr>
             );
           })}
@@ -390,6 +396,7 @@ export default function ElectionDetail() {
     </div>
   </div>
 )}
+
 
       </div>
 
