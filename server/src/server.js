@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 
 import connectDB from './config/db.js';
 import routes from './routes/index.js';
+import adminRoutes from "./routes/adminRoutes.js";
 import errorHandler from './middleware/errorHandler.js';
 
 dotenv.config();
@@ -30,6 +31,7 @@ app.use('/api', routes);
 // --- ERROR HANDLER ---
 app.use(errorHandler);
 
+app.use("/api/admin", adminRoutes);
 // --- MONGO CONNECT ---
 let mongoURI = process.env.MONGO_URI;
 if (!mongoURI) {

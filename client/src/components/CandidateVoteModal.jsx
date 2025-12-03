@@ -34,6 +34,12 @@ export default function CandidateVoteModal({ open, onClose, electionId, candidat
         voterId: voterId.trim(),
         pin: pin.trim()
       });
+      console.log("SENDING VOTE:", {
+  electionId,
+  candidateId: selected._id || selected.id,
+  voterId: voterId.trim(),
+  pin: pin.trim()
+});
       setLoading(false);
       onVoted && onVoted();
       onClose();

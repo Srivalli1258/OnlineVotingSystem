@@ -1,32 +1,62 @@
 // server/src/middleware/adminAuth.js
-import jwt from 'jsonwebtoken';
+import jwt from "jsonwebtoken";
 
 export function adminAuth(req, res, next) {
   try {
     const header = req.headers.authorization;
-    if (!header || !header.startsWith('Bearer ')) {
-      console.warn('adminAuth: missing or malformed Authorization header', header);
-      return res.status(401).json({ message: 'No admin token' });
-    }
-    const token = header.split(' ')[1];
 
-    try {
-      // verify token and log payload for debugging
-      const payload = jwt.verify(token, process.env.JWT_SECRET || 'devsecret');
-      console.log('adminAuth: verified token payload:', { sub: payload.adminId || payload.id, role: payload.role, employeeId: payload.employeeId });
-      if (payload.role !== 'admin') {
-        console.warn('adminAuth: token role not admin', payload.role);
-        return res.status(403).json({ message: 'Not an admin' });
-      }
-      req.admin = payload;
-      return next();
-    } catch (err) {
-      console.error('adminAuth: verify error ->', err && err.message);
-      console.error('adminAuth: token snippet ->', token ? token.slice(0,60) + '...' : 'NO_TOKEN');
-      return res.status(401).json({ message: 'Invalid admin token' });
+    if (!header || !header.startsWith("Bearer ")) {
+      console.warn("adminAuth: Missing Authorization header");
+      return res.status(401).json({ message: "Authorization required" });
     }
+
+    const token = header.split(" ")[1];
+
+    let payload;
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET || "devsecret");
+    } catch (err) {
+      console.error("adminAuth: Token verify error:", err.message);
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
+
+    // Support multiple possible payload formats
+    const role =
+      payload.role ||
+      payload?.user?.role ||
+      payload?.roleName ||
+      payload?.permissions ||
+      null;
+
+    const adminId =
+      payload.adminId ||
+      payload.id ||
+      payload.userId ||
+      payload?.user?._id ||
+      payload?.user?.id ||
+      null;
+
+    // Debug log (optional)
+    console.log("adminAuth → decoded payload:", {
+      adminId,
+      role,
+    });
+
+    if (!role || role.toLowerCase() !== "admin") {
+      console.warn("adminAuth: Access denied — role is not admin");
+      return res.status(403).json({ message: "Admin access required" });
+    }
+
+    // attach to request
+    req.admin = {
+      ...payload,
+      role: role.toLowerCase(),
+      adminId,
+    };
+
+    return next();
   } catch (err) {
-    console.error('adminAuth: unexpected error', err);
-    return res.status(401).json({ message: 'Invalid admin token' });
+    console.error("adminAuth: Unexpected error:", err);
+    return res.status(500).json({ message: "Internal authentication error" });
   }
 }

@@ -264,6 +264,7 @@ export async function addCandidate(req, res, next) {
 
 // Replace the existing participateAndRegister with this function
 // Paste this function into server/src/controllers/electionController.js
+
 export async function participateAndRegister(req, res) {
   const electionId = req.params.id;
   const payload = req.body || {};
@@ -390,8 +391,26 @@ export async function participateAndRegister(req, res) {
     const created = await Candidate.create([candidateData], { session });
     const candidate = created[0];
 
-    // push to nested array (if used)
-    election.candidates = Array.isArray(election.candidates) ? election.candidates.concat(candidate._id) : [candidate._id];
+    // push to nested array (if used) — **fixed**: push full nested object (not only _id)
+    const nestedCandidateObj = {
+      _id: candidate._id,
+      name: candidate.name,
+      fullName: candidate.fullName || '',
+      address: candidate.address || '',
+      party: candidate.party || '',
+      schemes: candidate.schemes || [],
+      createdBy: candidate.createdBy,
+      createdAt: candidate.createdAt,
+      symbol: candidate.symbol || '',
+      manifesto: candidate.manifesto || ''
+    };
+
+    if (Array.isArray(election.candidates)) {
+      election.candidates.push(nestedCandidateObj);
+    } else {
+      election.candidates = [nestedCandidateObj];
+    }
+
     await election.save({ session });
 
     await session.commitTransaction();
@@ -435,6 +454,7 @@ export async function participateAndRegister(req, res) {
     return res.status(status).json({ message: err?.message || 'Server error' });
   }
 }
+
 
 
 export async function getResults(req, res, next) {

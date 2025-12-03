@@ -45,8 +45,8 @@ export default function ElectionDetail() {
   // vote-list modal (existing)
   const [voteModalOpen, setVoteModalOpen] = useState(false);
 
-  // admin results
-  const [results, setResults] = useState(null);
+  // admin results - store detailed votes array
+  const [results, setResults] = useState([]); // default to empty array
   const [loadingResults, setLoadingResults] = useState(false);
 
   const isMounted = useRef(true);
@@ -100,27 +100,36 @@ export default function ElectionDetail() {
     }
   }
 
-  // admin results
+  // ---------------------------
+  // Corrected loadResults() — expects backend to return:
+  // { success: true, votes: [...], counts: [...] }
+  // where votes is an array of vote objects:
+  // { voterId: {_id,name,email} | string, candidateId: {_id,name} | string, createdAt }
+  // ---------------------------
   async function loadResults() {
     if (!isAdmin) return;
+
     setLoadingResults(true);
-    setResults(null);
+    setResults([]);
+
     try {
       const res = await api.get(`/elections/${id}/results`);
       const payload = res.data || {};
-      let normalized = [];
-      if (Array.isArray(payload.results)) normalized = payload.results;
-      else if (payload && typeof payload === 'object') {
-        normalized = Object.keys(payload).map(k => {
-          const v = payload[k];
-          if (typeof v === 'number') return { candidate: { id: k, name: k }, count: v };
-          return v;
-        });
-      }
+
+      // backend returns detailed votes in payload.votes
+      const votes = Array.isArray(payload.votes)
+        ? payload.votes
+        : // fallback: if the backend returned votes directly as array
+          Array.isArray(payload)
+            ? payload
+            : [];
+
       if (!isMounted.current) return;
-      setResults(normalized);
+
+      setResults(votes);
     } catch (err) {
       console.error('Failed loadResults', err);
+      if (!isMounted.current) return;
       setResults([]);
     } finally {
       if (isMounted.current) setLoadingResults(false);
@@ -334,21 +343,50 @@ export default function ElectionDetail() {
         )}
 
         {/* View Votes (admin) */}
-        {tab === 'View Votes' && isAdmin && (
+        {tab === "View Votes" && isAdmin && (
           <div className="card">
-            <h3>Votes / Results</h3>
-            {loadingResults && <div className="note">Loading…</div>}
-            {!loadingResults && results && results.length === 0 && <div className="note">No votes recorded yet.</div>}
-            {!loadingResults && results && results.length > 0 && (
-              <table style={{ width:'100%', borderCollapse:'collapse' }}>
-                <thead><tr><th style={{ padding:'8px 6px' }}>Candidate</th><th style={{ padding:'8px 6px' }}>Votes</th></tr></thead>
+            <h3 style={{ marginTop: 0 }}>Votes (Admin View)</h3>
+
+            {loadingResults && <div className="note">Loading votes…</div>}
+
+            {!loadingResults && Array.isArray(results) && results.length === 0 && (
+              <div className="note">No votes cast for this election yet.</div>
+            )}
+
+            {!loadingResults && Array.isArray(results) && results.length > 0 && (
+              <table className="results-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th style={{ padding: "8px 6px" }}>Voter ID</th>
+                    <th style={{ padding: "8px 6px" }}>Voter Name</th>
+                    <th style={{ padding: "8px 6px" }}>Candidate Voted</th>
+                    <th style={{ padding: "8px 6px" }}>Voted At</th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {results.map((r, i) => <tr key={i} style={{ borderTop:'1px solid #f1f5f9' }}><td style={{ padding:'8px 6px' }}>{r.candidate?.name}</td><td style={{ padding:'8px 6px', fontWeight:700 }}>{r.count}</td></tr>)}
+                  {results.map((v, i) => {
+                    // handle both populated and unpopulated shapes
+                    const voterIdStr = typeof v.voterId === 'string' ? v.voterId : (v.voterId?._id ?? v.voterId?.id ?? 'N/A');
+                    const voterName = v.voterId && typeof v.voterId === 'object' ? (v.voterId.name ?? '') : '';
+                    const candidateName = v.candidateId && typeof v.candidateId === 'object' ? (v.candidateId.name ?? '') : (typeof v.candidateId === 'string' ? v.candidateId : 'Unknown Candidate');
+
+                    return (
+                      <tr key={v._id || `${voterIdStr}-${i}`} style={{ borderTop: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "8px 6px" }}>{voterIdStr}</td>
+                        <td style={{ padding: "8px 6px" }}>{voterName || 'Unknown'}</td>
+                        <td style={{ padding: "8px 6px", fontWeight: 700 }}>{candidateName}</td>
+                        <td style={{ padding: "8px 6px" }}>{v.createdAt ? new Date(v.createdAt).toLocaleString() : 'N/A'}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
-            <div style={{ marginTop:12 }}>
-              <button className="btn secondary" onClick={() => loadResults()}>Refresh results</button>
+
+            <div style={{ marginTop: 12 }}>
+              <button className="btn secondary" onClick={() => loadResults()}>
+                Refresh
+              </button>
             </div>
           </div>
         )}

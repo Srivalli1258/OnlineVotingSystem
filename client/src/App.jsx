@@ -12,6 +12,8 @@ import Navbar from "./components/Navbar";
 import About from "./pages/About";
 import "./index.css";
 import Contact from "./pages/Contact";
+import AdminViewVotes from "./pages/AdminViewVotes";
+
 
 import useAuth from "./hooks/useAuth";
 import ProtectedAdminRoute from "./components/ProtectedAdminRoute";
@@ -60,6 +62,7 @@ export default function App() {
             <Route path="elections" element={<AdminLayout><Elections /></AdminLayout>} />
             <Route path="elections/create" element={<AdminLayout><CreateElection /></AdminLayout>} />
           </Route>
+           <Route path="/admin/votes" element={<AdminViewVotes />} />
 
           <Route path="/register" element={<Register />} />
           <Route path="*" element={<h2>Page not found</h2>} />

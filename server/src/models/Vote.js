@@ -1,11 +1,10 @@
-// server/src/models/Vote.js
 import mongoose from "mongoose";
 
-const VoteSchema = new mongoose.Schema({
+const voteSchema = new mongoose.Schema({
   electionId: { type: mongoose.Schema.Types.ObjectId, ref: "Election", required: true },
-  candidateId: { type: mongoose.Schema.Types.ObjectId, required: true },
-  voterId: { type: String, required: true }, // matches AllowedVoter.voterId
+  candidateId: { type: mongoose.Schema.Types.ObjectId, ref: "Candidate", required: true },
+  voterId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   createdAt: { type: Date, default: Date.now }
-}, { timestamps: false });
+});
 
-export default mongoose.model("Vote", VoteSchema);
+export default mongoose.model("Vote", voteSchema);
