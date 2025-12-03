@@ -1,14 +1,13 @@
-// server/src/routes/electionRoutes.js
+// server/src/routes/electionRoutes.js (or wherever you define /api/elections routes)
 import express from "express";
-import { getElectionResultsDetailed } from "../controllers/electionResultsController.js";
-import adminAuth from "../middleware/adminAuth.js"; // your admin middleware
-// Ensure this router is mounted at "/api/elections"
+import { getElectionVotes } from "../controllers/adminController.js";
+import { adminAuth } from "../middleware/adminAuth.js";
 
 const router = express.Router();
 
 // ... other election routes
 
-// GET election results (admin only)
-router.get("/:id/results", adminAuth, getElectionResultsDetailed);
+// Admin-only results route — keep the same path your frontend calls
+router.get("/:id/results", adminAuth, getElectionVotes);
 
 export default router;

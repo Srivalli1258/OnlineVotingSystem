@@ -115,6 +115,8 @@ export default function ElectionDetail() {
     try {
       const res = await api.get(`/elections/${id}/results`);
       const payload = res.data || {};
+      const normalized = Array.isArray(payload.votes) ? payload.votes : [];
+      setResults(normalized);
 
       // backend returns detailed votes in payload.votes
       const votes = Array.isArray(payload.votes)
@@ -343,53 +345,51 @@ export default function ElectionDetail() {
         )}
 
         {/* View Votes (admin) */}
-        {tab === "View Votes" && isAdmin && (
-          <div className="card">
-            <h3 style={{ marginTop: 0 }}>Votes (Admin View)</h3>
+{tab === "View Votes" && isAdmin && (
+  <div className="card">
+    <h3 style={{ marginTop: 0 }}>Votes (Admin View)</h3>
 
-            {loadingResults && <div className="note">Loading votes…</div>}
+    {loadingResults && <div className="note">Loading votes…</div>}
 
-            {!loadingResults && Array.isArray(results) && results.length === 0 && (
-              <div className="note">No votes cast for this election yet.</div>
-            )}
+    {!loadingResults && Array.isArray(results) && results.length === 0 && (
+      <div className="note">No votes cast for this election yet.</div>
+    )}
 
-            {!loadingResults && Array.isArray(results) && results.length > 0 && (
-              <table className="results-table" style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    <th style={{ padding: "8px 6px" }}>Voter ID</th>
-                    <th style={{ padding: "8px 6px" }}>Voter Name</th>
-                    <th style={{ padding: "8px 6px" }}>Candidate Voted</th>
-                    <th style={{ padding: "8px 6px" }}>Voted At</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.map((v, i) => {
-                    // handle both populated and unpopulated shapes
-                    const voterIdStr = typeof v.voterId === 'string' ? v.voterId : (v.voterId?._id ?? v.voterId?.id ?? 'N/A');
-                    const voterName = v.voterId && typeof v.voterId === 'object' ? (v.voterId.name ?? '') : '';
-                    const candidateName = v.candidateId && typeof v.candidateId === 'object' ? (v.candidateId.name ?? '') : (typeof v.candidateId === 'string' ? v.candidateId : 'Unknown Candidate');
+    {!loadingResults && Array.isArray(results) && results.length > 0 && (
+      <table className="results-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th style={{ padding: "8px 6px" }}>Voter ID</th>
+            <th style={{ padding: "8px 6px" }}>Voted At</th>
+          </tr>
+        </thead>
+        <tbody>
+          {results.map((v, i) => {
+            const voterIdStr =
+              typeof v.voterId === "string"
+                ? v.voterId
+                : v.voterId?._id ?? v.voterId?.id ?? "N/A";
 
-                    return (
-                      <tr key={v._id || `${voterIdStr}-${i}`} style={{ borderTop: "1px solid #f1f5f9" }}>
-                        <td style={{ padding: "8px 6px" }}>{voterIdStr}</td>
-                        <td style={{ padding: "8px 6px" }}>{voterName || 'Unknown'}</td>
-                        <td style={{ padding: "8px 6px", fontWeight: 700 }}>{candidateName}</td>
-                        <td style={{ padding: "8px 6px" }}>{v.createdAt ? new Date(v.createdAt).toLocaleString() : 'N/A'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
+            return (
+              <tr key={v._id || `${voterIdStr}-${i}`} style={{ borderTop: "1px solid #f1f5f9" }}>
+                <td style={{ padding: "8px 6px" }}>{voterIdStr}</td>
+                <td style={{ padding: "8px 6px" }}>
+                  {v.createdAt ? new Date(v.createdAt).toLocaleString() : "N/A"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )}
 
-            <div style={{ marginTop: 12 }}>
-              <button className="btn secondary" onClick={() => loadResults()}>
-                Refresh
-              </button>
-            </div>
-          </div>
-        )}
+    <div style={{ marginTop: 12 }}>
+      <button className="btn secondary" onClick={() => loadResults()}>
+        Refresh
+      </button>
+    </div>
+  </div>
+)}
 
       </div>
 

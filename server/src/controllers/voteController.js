@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import AllowedVoter from "../models/AllowedVoter.js";
 import Vote from "../models/Vote.js";
 import Election from "../models/Election.js";
+import Candidate from "../models/Candidate.js";
+import User from "../models/User.js";
 
 /**
  * castVote
@@ -12,241 +14,212 @@ import Election from "../models/Election.js";
 export async function castVote(req, res) {
   try {
     const electionId = req.params.id;
-    const { candidateId, voterId, pin } = req.body;
+    const { candidateId, voterId, pin } = req.body || {};
 
     console.log("CASTVOTE: body=", req.body);
     console.log("CASTVOTE: params -> electionId:", electionId, "candidateId:", candidateId);
 
-    if (!candidateId || !voterId || !pin) {
-      console.log("CASTVOTE: missing field ->", { candidateId, voterId, pin });
+    if (!electionId) return res.status(400).json({ message: "Election id required" });
+    if (!candidateId || !voterId || (pin === undefined || pin === null)) {
       return res.status(400).json({ message: "candidateId, voterId and pin are required" });
     }
 
-    // Verify election exists and is open
-    const election = await Election.findById(electionId);
+    // ensure election exists & open
+    const election = await Election.findById(electionId).lean();
     if (!election) return res.status(404).json({ message: "Election not found" });
-
     const now = new Date();
-    if (election.startAt && now < new Date(election.startAt))
-      return res.status(400).json({ message: "Election has not started" });
+    if (election.startAt && new Date(election.startAt) > now) return res.status(400).json({ message: "Election has not started" });
+    if (election.endAt && new Date(election.endAt) < now) return res.status(400).json({ message: "Election is closed" });
 
-    if (election.endAt && now > new Date(election.endAt))
-      return res.status(400).json({ message: "Election is closed" });
-
-    // --------- Robust lookup with correct diagnostics & safe guards ----------
-const normalizedVoterId = String(voterId).trim();
-const canonicalVoterId = normalizedVoterId.toUpperCase();
-
-function escapeRegex(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-console.log("CASTVOTE: mongoose db:", mongoose.connection.name, "readyState:", mongoose.connection.readyState);
-const db = mongoose.connection.db;
-
-// list collections (diagnostic)
-let detectedCollName = "allowedvoters"; // default
-try {
-  const cols = await db.listCollections().toArray();
-  const colNames = cols.map(c => c.name);
-  console.log("CASTVOTE: collections in DB:", colNames);
-  const candidates = ["allowedvoters", "allowedVoters", "allowed_voters", "allowed_voter", "allowedvoter"];
-  const foundName = candidates.find(n => colNames.includes(n));
-  detectedCollName = foundName || colNames.find(n => n.toLowerCase().includes("allowed")) || detectedCollName;
-} catch (listErr) {
-  console.warn("CASTVOTE: could not list collections:", listErr && listErr.message);
-}
-
-console.log("CASTVOTE: looking up voterId (normalized):", normalizedVoterId);
-let allowed = null;
-
-// 1) Try Mongoose model lookup first (safe regex)
-try {
-  const re = new RegExp(`^${escapeRegex(normalizedVoterId)}$`, "i");
-  allowed = await AllowedVoter.findOne({ voterId: re });
-  console.log("CASTVOTE: AllowedVoter model lookup returned:", !allowed);
-} catch (mErr) {
-  console.warn("CASTVOTE: AllowedVoter model lookup error:", mErr && mErr.message);
-  allowed = null;
-}
-
-// --- DIAG: inspect the model's collection + db and compare to raw collection ---
-try {
-  console.log("CASTVOTE DIAG: AllowedVoter.model.collection.name:", AllowedVoter.collection && AllowedVoter.collection.name);
-  console.log("CASTVOTE DIAG: AllowedVoter.model.db.name:", AllowedVoter.db && AllowedVoter.db.databaseName);
-} catch (e) {
-  console.warn("CASTVOTE DIAG: cannot read AllowedVoter.collection/db:", e && e.message);
-}
-
-try {
-  const modelDoc = allowed ? { _id: String(allowed._id), voterId: allowed.voterId || allowed.voterID || null, pin: allowed.pin } : null;
-  console.log("CASTVOTE DIAG: modelDoc (from AllowedVoter.findOne):", modelDoc);
-} catch (e) {
-  console.warn("CASTVOTE DIAG: cannot stringify model doc:", e && e.message);
-}
-
-// Raw DB handle diagnostics (the same object you use for raw lookups)
-try {
-  const rawDb = mongoose.connection.db;
-  console.log("CASTVOTE DIAG: mongoose.connection.name:", mongoose.connection.name);
-  console.log("CASTVOTE DIAG: rawDb.databaseName:", rawDb.databaseName || rawDb.s.databaseName);
-  // how many collections on this raw DB?
-  const cols = await rawDb.listCollections().toArray();
-  console.log("CASTVOTE DIAG: rawDb collections:", cols.map(c=>c.name));
-  // sample the raw allowedvoters collection
-  const rawColl = rawDb.collection(AllowedVoter.collection && AllowedVoter.collection.name ? AllowedVoter.collection.name : "allowedvoters");
-  const sample = await rawColl.find().limit(5).toArray();
-  console.log("CASTVOTE DIAG: rawColl sample (collection used):", (rawColl && sample) ? sample.map(d => ({ _id: String(d._id), ...d })) : "no-coll");
-  try {
-    const cnt = await rawColl.countDocuments();
-    console.log("CASTVOTE DIAG: rawColl count:", cnt);
-  } catch(e) {
-    console.warn("CASTVOTE DIAG: rawColl count error:", e && e.message);
-  }
-} catch (e) {
-  console.warn("CASTVOTE DIAG: raw DB diagnostic error:", e && e.message);
-}
-
-
-// 2) Raw fallback using the detected collection name
-if (!allowed) {
-  try {
-    console.log("CASTVOTE: using raw collection name:", detectedCollName);
-    const rawColl = db.collection(detectedCollName);
-
-    // quick probe: log first 5 docs and count (helps see why count == 0)
-    try {
-      const sampleDocs = await rawColl.find().limit(5).toArray();
-      console.log("CASTVOTE: rawColl sample (first 5):", sampleDocs.map(d => ({ _id: String(d._id), ...d })));
-      const cnt = await rawColl.countDocuments();
-      console.log(`CASTVOTE: rawColl (${detectedCollName}) count:`, cnt);
-    } catch (probeErr) {
-      console.warn("CASTVOTE: rawColl probe error:", probeErr && probeErr.message);
+    // verify candidate belongs to election (best-effort)
+    if (Array.isArray(election.candidates) && election.candidates.length > 0) {
+      const found = election.candidates.find(c => String(c) === String(candidateId) || String(c?._id) === String(candidateId));
+      if (!found) return res.status(400).json({ message: "Candidate not part of this election" });
+    } else {
+      const candExists = await Candidate.findById(candidateId).lean();
+      if (!candExists) return res.status(400).json({ message: "Candidate not found" });
     }
 
-    // precise exact-match attempts on common field variants
-    const fieldQueries = [
-      { voterId: normalizedVoterId },
-      { voterID: normalizedVoterId },
-      { voterid: normalizedVoterId },
-      { voterId: canonicalVoterId },
-      { voterID: canonicalVoterId },
-      { voterid: canonicalVoterId }
-    ];
+    // normalize input
+    const normalizedVoterId = String(voterId).trim();
+    const canonicalVoterId = normalizedVoterId.toUpperCase();
+    function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
-    let rawDoc = null;
-    for (const q of fieldQueries) {
-      rawDoc = await rawColl.findOne(q);
-      if (rawDoc) {
-        console.log("CASTVOTE: raw exact-match query succeeded with query:", q);
+    const db = mongoose.connection.db;
+
+    // 1) Try Mongoose AllowedVoter model lookup (case-insensitive)
+    let allowed = null;
+    try {
+      const re = new RegExp(`^${escapeRegex(normalizedVoterId)}$`, "i");
+      allowed = await AllowedVoter.findOne({ voterId: re }).exec();
+      console.log("CASTVOTE: AllowedVoter model lookup success:", !!allowed);
+    } catch (mErr) {
+      console.warn("CASTVOTE: AllowedVoter model lookup error:", mErr && mErr.message);
+      allowed = null;
+    }
+
+    // 2) Raw DB fallback (if allowed not found)
+    if (!allowed) {
+      try {
+        const cols = await db.listCollections().toArray();
+        const colNames = cols.map(c => c.name);
+        const candidateNames = ["allowedvoters", "allowedVoters", "allowed_voters", "allowed_voter", "allowedvoter"];
+        const foundName = candidateNames.find(n => colNames.includes(n));
+        const detectedCollName = foundName || colNames.find(n => n.toLowerCase().includes("allowed")) || "allowedvoters";
+        const rawColl = db.collection(detectedCollName);
+
+        // exact-field attempts
+        const fieldQueries = [
+          { voterId: normalizedVoterId },
+          { voterID: normalizedVoterId },
+          { voterid: normalizedVoterId },
+          { voterId: canonicalVoterId },
+          { voterID: canonicalVoterId },
+        ];
+
+        let rawDoc = null;
+        for (const q of fieldQueries) {
+          try { rawDoc = await rawColl.findOne(q); if (rawDoc) break; } catch (qErr) {}
+        }
+
+        if (!rawDoc) {
+          const escaped = escapeRegex(normalizedVoterId);
+          rawDoc =
+            (await rawColl.findOne({ voterId: { $regex: `^${escaped}$`, $options: "i" } })) ||
+            (await rawColl.findOne({ voterID: { $regex: `^${escaped}$`, $options: "i" } }));
+        }
+
+        if (!rawDoc) {
+          // limited fallback scan (avoid huge scans)
+          try {
+            const docs = await rawColl.find().limit(1000).toArray();
+            const targetUpper = normalizedVoterId.toUpperCase();
+            for (const doc of docs) {
+              for (const k of Object.keys(doc)) {
+                const v = doc[k];
+                if (typeof v === "string" && v.trim().toUpperCase() === targetUpper) {
+                  rawDoc = doc;
+                  break;
+                }
+              }
+              if (rawDoc) break;
+            }
+          } catch (scanErr) { console.warn("CASTVOTE: fallback-scan error:", scanErr && scanErr.message); }
+        }
+
+        if (rawDoc) {
+          rawDoc._isRaw = true;
+          rawDoc._rawCollectionName = detectedCollName;
+          allowed = rawDoc;
+          console.log("CASTVOTE: raw allowed voter found:", rawDoc._id || rawDoc.voterId || rawDoc.voterID);
+        } else {
+          console.log("CASTVOTE: raw lookup found no matching voter");
+        }
+      } catch (rawErr) {
+        console.error("CASTVOTE: raw lookup error:", rawErr && (rawErr.stack || rawErr.message || rawErr));
+      }
+    }
+
+    if (!allowed) {
+      console.log("CASTVOTE: voter not found for", normalizedVoterId);
+      return res.status(400).json({ message: "voter not found" });
+    }
+
+    // Safely resolve a User ObjectId if possible:
+    let voterObjectId = null;
+    const possibleObjectFields = ["voterId","user","userId","userRef","voterRef"];
+    for (const f of possibleObjectFields) {
+      const val = allowed[f];
+      if (val && mongoose.Types.ObjectId.isValid(String(val))) {
+        voterObjectId = String(val);
         break;
       }
     }
 
-    // regex fallback if exact didn't find
-    if (!rawDoc) {
-      const escaped = escapeRegex(normalizedVoterId);
-      rawDoc =
-        (await rawColl.findOne({ voterId: { $regex: `^${escaped}$`, $options: "i" } })) ||
-        (await rawColl.findOne({ voterID: { $regex: `^${escaped}$`, $options: "i" } })) ||
-        (await rawColl.findOne({ voterid: { $regex: `^${escaped}$`, $options: "i" } }));
-      if (rawDoc) console.log("CASTVOTE: raw regex match succeeded");
-    }
-
-    // fallback-scan: if still not found, scan small sample and try matching string fields
-    if (!rawDoc) {
+    // If not found, try to find a User by common identifying fields
+    if (!voterObjectId) {
       try {
-        // scan limit - adjust smaller if your collection is huge; for your seed data this is safe
-        const scanLimit = 5000;
-        const docsToScan = await rawColl.find().limit(scanLimit).toArray();
-        const targetUpper = normalizedVoterId.toUpperCase();
-
-        for (const doc of docsToScan) {
-          for (const k of Object.keys(doc)) {
-            const v = doc[k];
-            if (typeof v === "string" && v.trim().toUpperCase() === targetUpper) {
-              rawDoc = doc;
-              console.log("CASTVOTE: fallback-scan matched field:", k, "value:", v, "doc._id:", String(doc._id));
-              break;
-            }
-          }
-          if (rawDoc) break;
+        const userQueryFields = [
+          { voterId: normalizedVoterId },
+          { code: normalizedVoterId },
+          { username: normalizedVoterId },
+          { email: normalizedVoterId },
+        ];
+        let foundUser = null;
+        for (const q of userQueryFields) {
+          foundUser = await User.findOne(q).select("_id").lean();
+          if (foundUser) break;
         }
-        if (!rawDoc) console.log("CASTVOTE: fallback-scan did not find a match in first", docsToScan.length, "docs");
-      } catch (scanErr) {
-        console.warn("CASTVOTE: fallback-scan error:", scanErr && scanErr.message);
+        if (foundUser) voterObjectId = String(foundUser._id);
+      } catch (uErr) {
+        console.warn("CASTVOTE: user lookup error:", uErr && uErr.message);
       }
     }
 
-    if (rawDoc) {
-      rawDoc._isRaw = true;
-      rawDoc._rawCollectionName = detectedCollName;
-      allowed = rawDoc;
-      console.log("CASTVOTE: raw allowed voter found:", allowed._id || allowed.voterId || allowed.voterID);
-    } else {
-      console.log("CASTVOTE: raw lookup found no matching voter for", normalizedVoterId, "in", detectedCollName);
+    // PIN check (safe because allowed exists)
+    const storedPin = (allowed.pin ?? allowed.PIN ?? allowed.pinCode ?? allowed.pin_number ?? null);
+    if (String(storedPin).trim() !== String(pin).trim()) {
+      console.log("CASTVOTE: pin mismatch -> stored:", storedPin, "provided:", pin);
+      return res.status(400).json({ message: "pin mismatch" });
     }
-  } catch (rawErr) {
-    console.error("CASTVOTE: raw collection lookup error:", rawErr && rawErr.stack || rawErr);
-  }
-}
 
-// If still not found, return immediately (do NOT access allowed.pin)
-if (!allowed) {
-  console.log("CASTVOTE: voter not found for", normalizedVoterId);
-  return res.status(400).json({ message: "voter not found" });
-}
+    // Check voted flag
+    if (allowed.voted || allowed.hasVoted || allowed.votedAt) {
+      console.log("CASTVOTE: already voted according to allowed record");
+      return res.status(409).json({ message: "This voter has already voted" });
+    }
 
-// ---------------------- now safe to check PIN and voted ----------------------
-// Check pin (normalize both sides to string trimmed)
-if (String(allowed.pin).trim() !== String(pin).trim()) {
-  console.log("CASTVOTE: pin mismatch", { stored: allowed.pin, provided: pin });
-  return res.status(400).json({ message: "pin mismatch" });
-}
+    // Build the values used by the existing unique index (legacy fields)
+    // Ensure electionKey is an ObjectId (if possible) to match existing docs
+    let electionKey = electionId;
+    try { if (mongoose.Types.ObjectId.isValid(String(electionId))) electionKey = mongoose.Types.ObjectId(String(electionId)); } catch (e) {}
 
-// check voted
-if (allowed.voted) {
-  console.log("CASTVOTE: already voted:", normalizedVoterId);
-  return res.status(400).json({ message: "This voter has already voted" });
-}
+    // voterKey: use ObjectId when available, otherwise use string code to avoid many nulls
+    let voterKey = voterObjectId ? (mongoose.Types.ObjectId(String(voterObjectId))) : normalizedVoterId;
 
+    // pre-check duplicates using the same fields the DB index enforces
+    try {
+      const dupQuery = { election: electionKey, voter: voterKey };
+      const exists = await Vote.findOne(dupQuery).lean();
+      if (exists) {
+        console.log("CASTVOTE: duplicate detected via legacy index fields", dupQuery);
+        return res.status(409).json({ message: "Vote already recorded for this voter" });
+      }
+    } catch (dupErr) {
+      console.warn("CASTVOTE: duplicate pre-check error:", dupErr && dupErr.message);
+      // continue — the DB index will still protect, but we try to catch early
+    }
 
-    // --- Try a transaction (if supported), otherwise fallback to non-transactional writes ---
-    let session;
+    // Prepare vote payload: include both new and legacy field names to be safe.
+    const votePayload = {
+      // new-style fields
+      electionId,
+      candidateId,
+      createdAt: new Date(),
+      voterCode: normalizedVoterId,
+    };
+
+    if (voterObjectId) {
+      votePayload.voterId = voterObjectId;
+    }
+
+    // legacy fields (to satisfy the existing unique index)
+    votePayload.election = electionKey;
+    votePayload.voter = voterKey;
+
+    // Now write (transaction if possible)
+    let session = null;
     try {
       session = await mongoose.startSession();
       session.startTransaction();
 
-      // create vote within transaction
-      await Vote.create(
-        [
-          {
-            electionId,
-            candidateId,
-            voterId: allowed.voterId || allowed.voterID || normalizedVoterId,
-            createdAt: new Date()
-          }
-        ],
-        { session }
-      );
+      await Vote.create([votePayload], { session });
 
-      // update allowed voter - handle raw doc vs mongoose doc
+      // update allowed voter record
       if (allowed._isRaw) {
-        const collNameToUse = allowed._rawCollectionName || "allowedvoters";
-        const collToUse = mongoose.connection.db.collection(collNameToUse);
-        // include session only when it exists
-        if (session) {
-          await collToUse.updateOne(
-            { _id: allowed._id },
-            { $set: { voted: true, votedAt: new Date() } },
-            { session }
-          );
-        } else {
-          await collToUse.updateOne(
-            { _id: allowed._id },
-            { $set: { voted: true, votedAt: new Date() } }
-          );
-        }
+        const collName = allowed._rawCollectionName || (AllowedVoter.collection && AllowedVoter.collection.name) || "allowedvoters";
+        const coll = mongoose.connection.db.collection(collName);
+        await coll.updateOne({ _id: allowed._id }, { $set: { voted: true, votedAt: new Date() } }, { session });
       } else {
         allowed.voted = true;
         allowed.votedAt = new Date();
@@ -255,46 +228,42 @@ if (allowed.voted) {
 
       await session.commitTransaction();
       session.endSession();
-      return res.json({ message: "Vote recorded successfully" });
+
+      console.log("CASTVOTE: vote recorded (transactional) for", normalizedVoterId);
+      return res.status(201).json({ message: "Vote recorded successfully" });
     } catch (txErr) {
       if (session) {
-        try {
-          await session.abortTransaction();
-          session.endSession();
-        } catch (e) {}
+        try { await session.abortTransaction(); session.endSession(); } catch (e) {}
       }
-      console.warn("CASTVOTE: transaction failed, falling back - reason:", txErr.message || txErr);
+      console.warn("CASTVOTE: transaction failed, falling back:", txErr && txErr.message);
 
-      // Fallback: create vote and update allowed voter without transaction
+      // fallback non-transactional writes
       try {
-        await Vote.create({
-          electionId,
-          candidateId,
-          voterId: allowed.voterId || allowed.voterID || normalizedVoterId,
-          createdAt: new Date()
-        });
+        await Vote.create(votePayload);
 
         if (allowed._isRaw) {
-          const collNameToUse = allowed._rawCollectionName || "allowedvoters";
-          const rawColl = mongoose.connection.db.collection(collNameToUse);
-          await rawColl.updateOne(
-            { _id: allowed._id },
-            { $set: { voted: true, votedAt: new Date() } }
-          );
+          const collName = allowed._rawCollectionName || (AllowedVoter.collection && AllowedVoter.collection.name) || "allowedvoters";
+          const rawColl = mongoose.connection.db.collection(collName);
+          await rawColl.updateOne({ _id: allowed._id }, { $set: { voted: true, votedAt: new Date() } });
         } else {
           allowed.voted = true;
           allowed.votedAt = new Date();
           await allowed.save();
         }
 
-        return res.json({ message: "Vote recorded successfully" });
+        console.log("CASTVOTE: vote recorded (fallback) for", normalizedVoterId);
+        return res.status(201).json({ message: "Vote recorded successfully" });
       } catch (fallbackErr) {
-        console.error("CASTVOTE: fallback write error:", fallbackErr);
+        console.error("CASTVOTE: fallback write error:", fallbackErr && (fallbackErr.stack || fallbackErr.message || fallbackErr));
+        // If the failure is a duplicate key from the DB index, return 409 with friendly message
+        if (fallbackErr && (fallbackErr.code === 11000 || String(fallbackErr).includes("E11000"))) {
+          return res.status(409).json({ message: "Vote already recorded for this voter (duplicate index)" });
+        }
         return res.status(500).json({ message: "Error saving vote" });
       }
     }
   } catch (err) {
-    console.error("castVote error:", err);
+    console.error("castVote error:", err && (err.stack || err.message || err));
     return res.status(500).json({ message: "Server error" });
   }
 }

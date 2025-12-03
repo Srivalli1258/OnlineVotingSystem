@@ -457,30 +457,71 @@ export async function participateAndRegister(req, res) {
 
 
 
-export async function getResults(req, res, next) {
+export async function getResults(req, res) {
   try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'Invalid election id' });
+    const electionId = req.params.id;
 
-    const agg = await Vote.aggregate([
-      { $match: { election: mongoose.Types.ObjectId(id) } },
-      { $group: { _id: '$candidate', count: { $sum: 1 } } },
+    console.log("getResults → electionId =", electionId);
+
+    // Safely convert ID
+    let electionObjId = null;
+    if (mongoose.Types.ObjectId.isValid(electionId)) {
+      try {
+        electionObjId = new mongoose.Types.ObjectId(electionId);
+      } catch (e) {
+        console.log("ObjectId conversion failed:", e.message);
+      }
+    }
+
+    // MATCH both versions (string + ObjectId)
+    const matchConditions = {
+      $or: [
+        { electionId: electionId },
+        { electionId: electionObjId }
+      ]
+    };
+
+    console.log("MATCH CONDITION =", matchConditions);
+
+    const votes = await Vote.aggregate([
+      { $match: matchConditions },
+
+      // Join candidate data
+      {
+        $lookup: {
+          from: "candidates",
+          localField: "candidateId",
+          foreignField: "_id",
+          as: "cinfo"
+        }
+      },
+
+      // Join user ONLY if voterId is ObjectId
+      {
+        $lookup: {
+          from: "users",
+          localField: "voterId",
+          foreignField: "_id",
+          as: "uinfo"
+        }
+      },
+
+      {
+        $project: {
+          _id: 0,
+          voterCode: 1,
+          voterId: 1,
+          candidateId: 1,
+          createdAt: 1,
+          candidateName: { $arrayElemAt: ["$cinfo.name", 0] },
+          voterName: { $arrayElemAt: ["$uinfo.name", 0] }
+        }
+      }
     ]);
 
-    const results = (agg || []).map(r => ({ candidateId: String(r._id), count: r.count }));
-
-    return res.json({ results });
+    return res.json({ votes });
   } catch (err) {
-    console.error('getResults error', err);
-    return next(err);
+    console.error("getResults ERROR:", err);
+    return res.status(500).json({ message: "Server error loading results" });
   }
 }
-
-export default {
-  listElections,
-  getElection,
-  createElection,
-  addCandidate,
-  participateAndRegister,
-  getResults
-};
